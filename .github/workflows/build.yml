@@ -1,0 +1,77 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    name: Build j3ds
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkitarm:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build bannertool from source
+        run: |
+          git clone --depth 1 https://github.com/carstene1ns/3ds-bannertool.git /tmp/bannertool
+          cd /tmp/bannertool
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+          install -Dm755 build/bannertool /usr/local/bin/bannertool
+
+      - name: Build makerom from source
+        run: |
+          git clone --depth 1 https://github.com/3DSGuy/Project_CTR.git /tmp/makerom
+          cd /tmp/makerom/makerom
+          make deps
+          make program
+          install -Dm755 bin/makerom /usr/local/bin/makerom
+
+      - name: Build j3ds
+        run: |
+          make -j$(nproc)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: j3ds-build
+          path: |
+            j3ds.3dsx
+            j3ds.cia
+            j3ds.smdh
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: j3ds-build
+
+      - name: Generate QR code for .cia download
+        uses: snow-actions/qrcode@v2.0.0
+        with:
+          text: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/j3ds.cia
+          path: qrcode-j3ds.png
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            j3ds.3dsx
+            j3ds.cia
+            qrcode-j3ds.png
+          generate_release_notes: true

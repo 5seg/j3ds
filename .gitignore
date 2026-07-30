@@ -1,0 +1,31 @@
+# Build outputs
+build/
+*.3dsx
+*.smdh
+*.elf
+*.cia
+*.map
+
+# Intermediate files
+*.o
+*.d
+*.t3x
+*.bcfnt
+*~
+
+# Local tools (downloaded binaries)
+tools/bannertool
+tools/makerom
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local cache (host-side build artifacts)
+cache/

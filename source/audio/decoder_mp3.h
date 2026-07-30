@@ -1,0 +1,17 @@
+#ifndef AUDIO_DECODER_MP3_H
+#define AUDIO_DECODER_MP3_H
+
+#include <3ds.h>
+#include <stddef.h>
+
+typedef struct {
+	void* handle;
+	long rate;
+	int channels;
+} Mp3Decoder;
+
+Result mp3Init(Mp3Decoder* dec, const char* path);
+void mp3Exit(Mp3Decoder* dec);
+int mp3Decode(Mp3Decoder* dec, void* buffer, size_t bufferSize);
+
+#endif
