@@ -3,33 +3,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <3ds.h>
+#include <citro2d.h>
 
+#include "ui/gui.h"
 #include "ui/screens.h"
 #include "ui/browser.h"
 #include "ui/ui_player.h"
 #include "audio/audio_player.h"
 #include "storage/config.h"
 #include "net/http.h"
-#include "utils/image.h"
-
-static void appRenderTopBackground(void)
-{
-	u8* fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
-	if (!fb)
-		return;
-	if (g_app.current == SCREEN_PLAYER)
-		return;
-
-	/* A simple hardware-friendly skin: the top screen is a visual backdrop,
-	   while the bottom screen contains the readable controls. */
-	if (g_app.current == SCREEN_HOME)
-		imageDrawRect(fb, 0, 0, 240, 400, 20, 38, 64);
-	else if (g_app.current == SCREEN_SETTINGS)
-		imageDrawRect(fb, 0, 0, 240, 400, 35, 30, 55);
-	else
-		imageDrawRect(fb, 0, 0, 240, 400, 18, 55, 52);
-	imageDrawRect(fb, 0, 0, 240, 22, 110, 70, 185);
-}
+#include "ui/thumbnail.h"
 
 AppContext g_app;
 
@@ -79,7 +62,7 @@ void appUpdate(void)
 		if (g_app.touchDown) {
 			if (touch.px < 160 && touch.py >= 35 && touch.py < 125) {
 				screenChange(SCREEN_BROWSER);
-			browserLoadRoot();
+				browserLoadRoot();
 			} else if (touch.px >= 160 && touch.py >= 35 && touch.py < 125) {
 				screenChange(SCREEN_SETTINGS);
 			}
@@ -96,19 +79,27 @@ const char* appAuthToken(void)
 
 void appRender(void)
 {
-	consoleClear();
-	appRenderTopBackground();
+	/* Top screen: branded backdrop / album art. */
+	C2D_TargetClear(g_gui.top, GUI_COL_BG);
+	C2D_SceneBegin(g_gui.top);
 
+	guiRectGradient(0, 0, GUI_TOP_W, GUI_TOP_H, C2D_Color32(0x1A, 0x1E, 0x28, 0xFF),
+		GUI_COL_BG);
 	if (g_app.current == SCREEN_PLAYER)
 		playerRenderTop();
+	else
+		screenRenderTop();
 
-	printf("Jellyfin 3DS\n\n");
+	/* Bottom screen: interactive UI. */
+	C2D_TargetClear(g_gui.bottom, GUI_COL_BG);
+	C2D_SceneBegin(g_gui.bottom);
 	screenRender();
 }
 
 void appExit(void)
 {
 	configSave(&g_app.config);
+	thumbnailReleaseCache();
 	httpGlobalExit();
 	audioExit();
 }

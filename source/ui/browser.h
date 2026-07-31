@@ -34,5 +34,6 @@ void browserLoadRoot(void);
 void browserLoadItems(const char* parentId, ItemType type);
 void browserUpdate(void);
 void browserRender(void);
+void browserRenderTop(void);
 
 #endif

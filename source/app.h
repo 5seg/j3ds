@@ -32,5 +32,4 @@ void appUpdate(void);
 void appRender(void);
 void appExit(void);
 const char* appAuthToken(void);
-
 #endif

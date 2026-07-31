@@ -2,7 +2,9 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <citro2d.h>
 
+#include "ui/gui.h"
 #include "ui/browser.h"
 #include "ui/ui_player.h"
 #include "ui/input.h"
@@ -24,6 +26,11 @@ typedef enum {
 
 static int s_settingSel = 0;
 static char s_status[128] = "";
+
+#define HEADER_H   30
+#define HINT_H     34
+#define ROW_H      26
+#define ROW_GAP    4
 
 void screenInit(void)
 {
@@ -143,11 +150,16 @@ void screenUpdate(void)
 
 		if (g_app.kDown & KEY_A)
 			settingsEdit();
-		if (g_app.touchDown && g_app.touch.py >= 35 && g_app.touch.py < 170) {
-			int row = ((int)g_app.touch.py - 35) / 25;
-			if (row >= 0 && row < SET_COUNT) {
-				s_settingSel = row;
-				settingsEdit();
+
+		if (g_app.touchDown) {
+			float rowY = HEADER_H + 6;
+			for (int i = 0; i < SET_COUNT; ++i) {
+				float ry = rowY + i * (ROW_H + ROW_GAP);
+				if (g_app.touch.py >= ry && g_app.touch.py < ry + ROW_H) {
+					s_settingSel = i;
+					settingsEdit();
+					break;
+				}
 			}
 		}
 
@@ -179,30 +191,101 @@ void screenUpdate(void)
 	}
 }
 
+static void screenRenderHeader(const char* title, u32 accent)
+{
+	guiRect(0, 0, GUI_BOT_W, HEADER_H, GUI_COL_HEADER);
+	guiRect(0, HEADER_H - 2, GUI_BOT_W, 2, accent);
+	guiText(title, 10, 6, 0.6f, GUI_COL_TEXT);
+}
+
+static void screenRenderHints(const char* left, const char* mid, const char* right)
+{
+	float y = GUI_BOT_H - HINT_H;
+	guiRect(0, y, GUI_BOT_W, HINT_H, GUI_COL_HEADER);
+	guiRect(0, y, GUI_BOT_W, 1, GUI_COL_DIM);
+
+	if (left)
+		guiText(left, 8, y + 8, 0.45f, GUI_COL_MUTED);
+	if (mid)
+		guiTextCentered(mid, GUI_BOT_W / 2.0f, y + 8, 0.45f, GUI_COL_MUTED);
+	if (right)
+		guiTextRight(right, GUI_BOT_W - 8, y + 8, 0.45f, GUI_COL_MUTED);
+}
+
+static void screenRenderHome(void)
+{
+	screenRenderHeader("JELLYFIN 3DS", GUI_COL_SELECT);
+
+	/* Library card. */
+	float cardW = (GUI_BOT_W - 30) / 2.0f;
+	guiPanel(10, HEADER_H + 24, cardW, 96);
+	guiTextCentered("LIBRARY", 10 + cardW / 2.0f, HEADER_H + 40, 0.7f, GUI_COL_TEXT);
+	guiTextCentered("Browse music", 10 + cardW / 2.0f, HEADER_H + 74, 0.45f, GUI_COL_MUTED);
+	guiTextCentered("[A]", 10 + cardW / 2.0f, HEADER_H + 96, 0.45f, GUI_COL_DIM);
+
+	/* Setup card. */
+	float sx = 20 + cardW;
+	guiPanel(sx, HEADER_H + 24, cardW, 96);
+	guiTextCentered("SETUP", sx + cardW / 2.0f, HEADER_H + 40, 0.7f, GUI_COL_TEXT);
+	guiTextCentered("Server & login", sx + cardW / 2.0f, HEADER_H + 74, 0.45f, GUI_COL_MUTED);
+	guiTextCentered("[SELECT]", sx + cardW / 2.0f, HEADER_H + 96, 0.45f, GUI_COL_DIM);
+
+	/* Player card. */
+	guiPanel(10, HEADER_H + 132, GUI_BOT_W - 20, 52);
+	guiTextCentered("PLAYER", GUI_BOT_W / 2.0f, HEADER_H + 146, 0.6f, GUI_COL_TEXT);
+	guiTextCentered("Now playing  [B]", GUI_BOT_W / 2.0f, HEADER_H + 170, 0.45f, GUI_COL_MUTED);
+
+	screenRenderHints("A: Library", "SELECT: Setup", "START: Quit");
+}
+
+static void screenRenderSettings(void)
+{
+	screenRenderHeader("SETUP & LOGIN", GUI_COL_ACCENT);
+
+	const char* labels[SET_COUNT] = {
+		"Server URL", "Username", "Password", "API key", "SSL verify"
+	};
+
+	const char* values[SET_COUNT] = {
+		g_app.config.serverUrl,
+		g_app.config.username,
+		g_app.config.password[0] ? "********" : "(not set)",
+		g_app.config.apiKey[0] ? "******** (legacy)" : "(empty)",
+		g_app.config.disableSslVerify ? "disabled" : "enabled"
+	};
+
+	float rowY = HEADER_H + 6;
+	for (int i = 0; i < SET_COUNT; ++i) {
+		float ry = rowY + i * (ROW_H + ROW_GAP);
+		if (i == s_settingSel)
+			guiPanelHighlight(8, ry, GUI_BOT_W - 16, ROW_H);
+		else
+			guiRect(8, ry, GUI_BOT_W - 16, ROW_H, GUI_COL_PANEL);
+
+		guiText(labels[i], 16, ry + 5, 0.45f, GUI_COL_MUTED);
+
+		/* Value on the right, truncated. */
+		char tmp[40];
+		strncpy(tmp, values[i], sizeof(tmp) - 1);
+		tmp[sizeof(tmp) - 1] = '\0';
+		guiTextRight(tmp, GUI_BOT_W - 16, ry + 5, 0.45f, GUI_COL_TEXT);
+	}
+
+	if (s_status[0])
+		guiText(s_status, 10, rowY + SET_COUNT * (ROW_H + ROW_GAP) + 2, 0.45f,
+			GUI_COL_TEXT);
+
+	screenRenderHints("X: Test", "START: Save  B: Back", "Touch row to edit");
+}
+
 void screenRender(void)
 {
 	switch (g_app.current) {
 	case SCREEN_HOME:
-		printf("\x1b[1;36mJELLYFIN 3DS\x1b[0m\n");
-		printf("\x1b[90mYour music, on your 3DS\x1b[0m\n\n");
-		printf("+----------------+  +----------------+\n");
-		printf("|  [A] LIBRARY   |  | [SELECT] SETUP |\n");
-		printf("|  Browse music  |  | Server & login  |\n");
-		printf("+----------------+  +----------------+\n\n");
-		printf("Touch a card, or use A / SELECT\n");
-		printf("B: Player     START: Quit\n");
+		screenRenderHome();
 		break;
 	case SCREEN_SETTINGS:
-		printf("\x1b[1;36mSETUP & LOGIN\x1b[0m\n\n");
-		printf("%s Server URL : %.38s\n", s_settingSel == SET_SERVER_URL ? ">" : " ", g_app.config.serverUrl);
-		printf("%s Username   : %.38s\n", s_settingSel == SET_USERNAME ? ">" : " ", g_app.config.username);
-		printf("%s Password   : %s\n", s_settingSel == SET_PASSWORD ? ">" : " ", g_app.config.password[0] ? "********" : "(not set)");
-		printf("%s API key    : %s (legacy)\n", s_settingSel == SET_API_KEY ? ">" : " ", g_app.config.apiKey[0] ? "********" : "(empty)");
-		printf("%s SSL verify : %s\n", s_settingSel == SET_DISABLE_SSL ? ">" : " ", g_app.config.disableSslVerify ? "disabled" : "enabled");
-		printf("\nTouch a row or UP/DOWN + A to edit\n");
-		printf("X: test server  START: save  B: back\n");
-		if (s_status[0])
-			printf("\n%s\n", s_status);
+		screenRenderSettings();
 		break;
 	case SCREEN_BROWSER:
 		browserRender();
@@ -213,4 +296,20 @@ void screenRender(void)
 	default:
 		break;
 	}
+}
+
+/* A simple branded backdrop for the top screen. */
+void screenRenderTop(void)
+{
+	if (g_app.current == SCREEN_BROWSER) {
+		browserRenderTop();
+		return;
+	}
+
+	guiCircle(GUI_TOP_W / 2.0f, 88, 54, C2D_Color32(0x2A, 0x2E, 0x3A, 0xFF));
+	guiCircle(GUI_TOP_W / 2.0f, 88, 46, C2D_Color32(0xAA, 0x5C, 0xC3, 0xFF));
+	guiCircle(GUI_TOP_W / 2.0f, 88, 32, C2D_Color32(0x1A, 0x1E, 0x28, 0xFF));
+	guiTextCentered("Jellyfin 3DS", GUI_TOP_W / 2.0f, 168, 0.9f, GUI_COL_TEXT);
+	guiTextCentered("Your music, on your 3DS", GUI_TOP_W / 2.0f, 198, 0.5f,
+		GUI_COL_MUTED);
 }

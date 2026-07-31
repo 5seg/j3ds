@@ -4,20 +4,24 @@
 #include <string.h>
 #include <unistd.h>
 #include <3ds.h>
+#include <citro2d.h>
 
 #include "app.h"
 #include "audio/audio_player.h"
 #include "net/jellyfin.h"
 #include "sys/sd.h"
+#include "ui/gui.h"
 #include "ui/screens.h"
 #include "ui/thumbnail.h"
-#include "utils/image.h"
 
-#define PLAYER_THUMB_X      0
-#define PLAYER_THUMB_Y      80
+#define PLAYER_THUMB_X      80
+#define PLAYER_THUMB_Y      24
 #define PLAYER_THUMB_SIZE   240
 
 static CurrentTrack s_track;
+static char s_thumbUrl[512] = "";
+static Thumbnail s_thumb;
+static bool s_thumbReady = false;
 
 static void playerBuildAudioPath(const char* itemId, char* out, size_t outLen)
 {
@@ -29,6 +33,9 @@ static void playerBuildAudioPath(const char* itemId, char* out, size_t outLen)
 void playerInit(void)
 {
     memset(&s_track, 0, sizeof(s_track));
+    memset(&s_thumb, 0, sizeof(s_thumb));
+    s_thumbUrl[0] = '\0';
+    s_thumbReady = false;
     strncpy(s_track.title, "Test Track", sizeof(s_track.title) - 1);
     strncpy(s_track.artist, "Test Artist", sizeof(s_track.artist) - 1);
     strncpy(s_track.album, "Test Album", sizeof(s_track.album) - 1);
@@ -52,6 +59,9 @@ void playerSetTrack(const char* title, const char* artist, const char* album, co
         jellyfinGetThumbnailUrl(g_app.config.serverUrl, appAuthToken(), itemId,
             s_track.thumbnailUrl, sizeof(s_track.thumbnailUrl));
     }
+
+    s_thumbReady = false;
+    s_thumbUrl[0] = '\0';
 }
 
 void playerUpdate(void)
@@ -92,26 +102,54 @@ void playerUpdate(void)
 
 void playerRenderTop(void)
 {
-    u8* fb = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
+    if (s_track.thumbnailUrl[0] == '\0')
+        return;
 
-    /* Clear the top screen to black. */
-    imageDrawRect(fb, 0, 0, 240, 400, 0, 0, 0);
-
-    if (s_track.thumbnailUrl[0] != '\0') {
-        thumbnailDraw(s_track.thumbnailUrl, PLAYER_THUMB_X, PLAYER_THUMB_Y,
-            PLAYER_THUMB_SIZE, PLAYER_THUMB_SIZE);
+    if (!s_thumbReady && strcmp(s_thumbUrl, s_track.thumbnailUrl) != 0) {
+        strncpy(s_thumbUrl, s_track.thumbnailUrl, sizeof(s_thumbUrl) - 1);
+        s_thumbUrl[sizeof(s_thumbUrl) - 1] = '\0';
+        s_thumbReady = thumbnailLoad(s_thumbUrl, &s_thumb);
     }
+
+    if (!s_thumbReady || !s_thumb.valid)
+        return;
+
+    float scale = (float)PLAYER_THUMB_SIZE / (float)s_thumb.width;
+    float w = (float)s_thumb.width * scale;
+    float h = (float)s_thumb.height * scale;
+    float x = PLAYER_THUMB_X + (PLAYER_THUMB_SIZE - w) / 2.0f;
+    float y = PLAYER_THUMB_Y + (PLAYER_THUMB_SIZE - h) / 2.0f;
+    C2D_DrawImageAt(s_thumb.image, x, y, GUI_DEPTH, NULL, scale, scale);
 }
 
 void playerRender(void)
 {
-	printf("\x1b[1;36mNOW PLAYING\x1b[0m\n\n");
-	printf("Status: %s\n", audioIsPaused() ? "Paused"
-        : audioIsPlaying() ? "Playing" : "Stopped");
-    printf("Title:  %s\n", s_track.title);
-    printf("Artist: %s\n", s_track.artist);
-    printf("Album:  %s\n", s_track.album);
-	printf("\n+----------+  +----------+  +----------+\n");
-	printf("| B  BACK  |  | X  PLAY  |  | Y PAUSE  |\n");
-	printf("+----------+  +----------+  +----------+\n");
+    /* Header. */
+    guiRect(0, 0, GUI_BOT_W, 30, GUI_COL_HEADER);
+    guiRect(0, 28, GUI_BOT_W, 2, GUI_COL_SELECT);
+    guiText("NOW PLAYING", 10, 6, 0.6f, GUI_COL_TEXT);
+
+    /* Status pill. */
+    const char* status = audioIsPaused() ? "PAUSED"
+        : audioIsPlaying() ? "PLAYING" : "STOPPED";
+    u32 statusCol = audioIsPlaying() ? GUI_COL_GOOD
+        : audioIsPaused() ? GUI_COL_ACCENT : GUI_COL_DIM;
+    guiPanel(10, 40, 100, 22);
+    guiTextCentered(status, 60, 45, 0.45f, statusCol);
+
+    /* Track info. */
+    guiText(s_track.title, 12, 78, 0.6f, GUI_COL_TEXT);
+    guiText(s_track.artist, 12, 108, 0.45f, GUI_COL_MUTED);
+    guiText(s_track.album, 12, 128, 0.45f, GUI_COL_MUTED);
+
+    /* Controls. */
+    guiButton(8, 170, 96, 36, "BACK  [B]", false);
+    guiButton(112, 170, 96, 36, "PLAY  [X]", true);
+    guiButton(216, 170, 96, 36, "PAUSE [Y]", false);
+
+    /* Hint bar. */
+    guiRect(0, 210, GUI_BOT_W, 30, GUI_COL_HEADER);
+    guiRect(0, 210, GUI_BOT_W, 1, GUI_COL_DIM);
+    guiTextCentered("B: Stop & home   X: Play   Y: Pause", GUI_BOT_W / 2.0f, 218,
+        0.4f, GUI_COL_MUTED);
 }

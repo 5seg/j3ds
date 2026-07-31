@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <3ds.h>
+#include <citro2d.h>
 #include <jansson.h>
 
 #include "app.h"
@@ -15,15 +16,22 @@
 #include "net/jellyfin.h"
 #include "storage/config.h"
 #include "sys/sd.h"
+#include "ui/gui.h"
 #include "ui/input.h"
 #include "ui/ui_player.h"
 #include "ui/screens.h"
+#include "ui/thumbnail.h"
 #include "utils/json.h"
 
-#define BROWSER_VISIBLE     18
+#define BROWSER_VISIBLE     7
 #define BROWSER_STACK_MAX   8
 #define BROWSER_STATUS_MAX  128
 #define BROWSER_STREAM_URL_MAX 2048
+
+#define BROWSER_HEADER_H    30
+#define BROWSER_LIST_TOP    48
+#define BROWSER_ROW_H       22
+#define BROWSER_HINT_Y      (GUI_BOT_H - 34)
 
 typedef struct {
     char id[64];
@@ -436,13 +444,14 @@ void browserUpdate(void)
         return;
 
     if (g_app.touchDown) {
-        if (g_app.touch.py >= 210) {
+        if (g_app.touch.py >= BROWSER_HINT_Y) {
             if (g_app.touch.px < 110)
                 g_app.kDown |= KEY_B;
             else if (g_app.touch.px >= 220)
                 g_app.kDown |= KEY_X;
-        } else if (g_app.touch.py >= 28 && g_app.touch.py < 205 && s_state.count > 0) {
-            int tapped = s_state.scroll + ((int)g_app.touch.py - 28) / 10;
+        } else if (g_app.touch.py >= BROWSER_LIST_TOP && s_state.count > 0) {
+            int tapped = s_state.scroll +
+                ((int)g_app.touch.py - BROWSER_LIST_TOP) / BROWSER_ROW_H;
             if (tapped >= 0 && tapped < s_state.count) {
                 s_state.selected = tapped;
                 g_app.kDown |= KEY_A;
@@ -529,43 +538,102 @@ void browserUpdate(void)
     }
 }
 
+static const char* browserItemBadge(ItemType type)
+{
+    switch (type) {
+    case ITEM_TYPE_VIEW:   return "V";
+    case ITEM_TYPE_ARTIST: return "A";
+    case ITEM_TYPE_ALBUM:  return "L";
+    case ITEM_TYPE_SONG:   return "S";
+    case ITEM_TYPE_FOLDER: return "F";
+    default:               return "?";
+    }
+}
+
+static u32 browserItemColor(ItemType type)
+{
+    switch (type) {
+    case ITEM_TYPE_VIEW:   return GUI_COL_ACCENT;
+    case ITEM_TYPE_ARTIST: return GUI_COL_GOOD;
+    case ITEM_TYPE_ALBUM:  return GUI_COL_SELECT;
+    case ITEM_TYPE_SONG:   return GUI_COL_TEXT;
+    default:               return GUI_COL_DIM;
+    }
+}
+
+static void browserBuildBreadcrumb(char* out, size_t outLen)
+{
+    out[0] = '\0';
+    strncat(out, "Libraries", outLen - strlen(out) - 1);
+    for (int i = 0; i < s_stackTop; ++i) {
+        strncat(out, " / ", outLen - strlen(out) - 1);
+        strncat(out, s_stack[i].name, outLen - strlen(out) - 1);
+    }
+}
+
 void browserRender(void)
 {
-    printf("\x1b[1;36mLIBRARY\x1b[0m\n");
+    /* Header. */
+    guiRect(0, 0, GUI_BOT_W, BROWSER_HEADER_H, GUI_COL_HEADER);
+    guiRect(0, BROWSER_HEADER_H - 2, GUI_BOT_W, 2, GUI_COL_SELECT);
+    guiText("LIBRARY", 10, 6, 0.6f, GUI_COL_TEXT);
 
+    /* Breadcrumb. */
     char path[256];
-    path[0] = '\0';
-    strncat(path, "Libraries", sizeof(path) - strlen(path) - 1);
-    for (int i = 0; i < s_stackTop; ++i) {
-        strncat(path, "/", sizeof(path) - strlen(path) - 1);
-        strncat(path, s_stack[i].name, sizeof(path) - strlen(path) - 1);
-    }
-    printf("%s\n", path);
+    browserBuildBreadcrumb(path, sizeof(path));
+    guiText(path, 10, 32, 0.4f, GUI_COL_MUTED);
 
+    /* List. */
     if (s_state.count <= 0) {
-        printf("No items.\n");
+        guiText("No items.", 12, 64, 0.45f, GUI_COL_MUTED);
     } else {
         int end = s_state.scroll + BROWSER_VISIBLE;
         if (end > s_state.count)
             end = s_state.count;
 
         for (int i = s_state.scroll; i < end; ++i) {
-            const char* marker = (i == s_state.selected) ? ">" : " ";
-            const char* icon = "[?]";
-            switch (s_state.items[i].type) {
-            case ITEM_TYPE_VIEW:   icon = "[V]"; break;
-            case ITEM_TYPE_ARTIST: icon = "[A]"; break;
-            case ITEM_TYPE_ALBUM:  icon = "[L]"; break;
-            case ITEM_TYPE_SONG:   icon = "[S]"; break;
-            case ITEM_TYPE_FOLDER: icon = "[F]"; break;
-            default:               icon = "[?]"; break;
-            }
-            printf("%s %s %.108s\n", marker, icon, s_state.items[i].name);
+            float y = BROWSER_LIST_TOP + (i - s_state.scroll) * BROWSER_ROW_H;
+            const BrowserItem* item = &s_state.items[i];
+
+            if (i == s_state.selected)
+                guiPanelHighlight(4, y, GUI_BOT_W - 8, BROWSER_ROW_H - 2);
+            else
+                guiRect(4, y, GUI_BOT_W - 8, BROWSER_ROW_H - 2, GUI_COL_PANEL2);
+
+            guiText(browserItemBadge(item->type), 12, y + 3, 0.45f,
+                browserItemColor(item->type));
+            guiText(item->name, 28, y + 3, 0.45f, GUI_COL_TEXT);
         }
     }
 
-    printf("\nUP/DOWN: move  A: open/play  L/R: page\n");
-    printf("Touch item to open | B: back | X: download\n");
+    /* Status line. */
     if (s_status[0])
-        printf("\n%s\n", s_status);
+        guiText(s_status, 12, BROWSER_HINT_Y - 16, 0.4f, GUI_COL_MUTED);
+
+    /* Hint bar. */
+    guiRect(0, BROWSER_HINT_Y, GUI_BOT_W, 34, GUI_COL_HEADER);
+    guiRect(0, BROWSER_HINT_Y, GUI_BOT_W, 1, GUI_COL_DIM);
+    guiText("B: Back  X: Cache", 8, BROWSER_HINT_Y + 8, 0.4f, GUI_COL_MUTED);
+    guiTextRight("A: Open/Play", GUI_BOT_W - 8, BROWSER_HINT_Y + 8, 0.4f,
+        GUI_COL_MUTED);
+}
+
+void browserRenderTop(void)
+{
+    if (s_state.count > 0 && s_state.selected < s_state.count) {
+        const BrowserItem* item = &s_state.items[s_state.selected];
+        guiTextCentered(item->name, GUI_TOP_W / 2.0f, 56, 0.8f, GUI_COL_TEXT);
+    }
+
+    char path[256];
+    browserBuildBreadcrumb(path, sizeof(path));
+    guiTextCentered(path, GUI_TOP_W / 2.0f, 92, 0.4f, GUI_COL_MUTED);
+
+    if (s_state.count > 0 && s_state.selected < s_state.count) {
+        const BrowserItem* item = &s_state.items[s_state.selected];
+        guiTextCentered(browserItemBadge(item->type), GUI_TOP_W / 2.0f, 120, 0.6f,
+            browserItemColor(item->type));
+        guiTextCentered("UP/DOWN move   L/R page", GUI_TOP_W / 2.0f, 200, 0.4f,
+            GUI_COL_DIM);
+    }
 }

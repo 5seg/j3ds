@@ -9,5 +9,6 @@ void screenPop(void);
 void screenChange(AppState state);
 void screenUpdate(void);
 void screenRender(void);
+void screenRenderTop(void);
 
 #endif
