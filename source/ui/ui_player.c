@@ -49,13 +49,22 @@ void playerSetTrack(const char* title, const char* artist, const char* album, co
 
     s_track.thumbnailUrl[0] = '\0';
     if (itemId && itemId[0] != '\0' && g_app.config.serverUrl[0] != '\0') {
-        jellyfinGetThumbnailUrl(g_app.config.serverUrl, g_app.config.apiKey, itemId,
+        jellyfinGetThumbnailUrl(g_app.config.serverUrl, appAuthToken(), itemId,
             s_track.thumbnailUrl, sizeof(s_track.thumbnailUrl));
     }
 }
 
 void playerUpdate(void)
 {
+	if (g_app.touchDown && g_app.touch.py >= 185) {
+		if (g_app.touch.px < 105)
+			g_app.kDown |= KEY_B;
+		else if (g_app.touch.px < 215)
+			g_app.kDown |= KEY_X;
+		else
+			g_app.kDown |= KEY_Y;
+	}
+
     if (g_app.kDown & KEY_X) {
         if (s_track.itemId[0] == '\0') {
             printf("No track selected\n");
@@ -96,11 +105,13 @@ void playerRenderTop(void)
 
 void playerRender(void)
 {
-    printf("Player\n\n");
-    printf("Status: %s\n", audioIsPaused() ? "Paused"
+	printf("\x1b[1;36mNOW PLAYING\x1b[0m\n\n");
+	printf("Status: %s\n", audioIsPaused() ? "Paused"
         : audioIsPlaying() ? "Playing" : "Stopped");
     printf("Title:  %s\n", s_track.title);
     printf("Artist: %s\n", s_track.artist);
     printf("Album:  %s\n", s_track.album);
-    printf("\nX: Play downloaded, Y: Pause, B: Back\n");
+	printf("\n+----------+  +----------+  +----------+\n");
+	printf("| B  BACK  |  | X  PLAY  |  | Y PAUSE  |\n");
+	printf("+----------+  +----------+  +----------+\n");
 }

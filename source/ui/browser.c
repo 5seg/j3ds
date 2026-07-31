@@ -39,6 +39,41 @@ static int s_stackTop = 0;
 static char s_status[BROWSER_STATUS_MAX] = "";
 static bool s_downloading = false;
 
+static Result browserEnsureAuthenticated(void)
+{
+    /* Password login is preferred. The stored API key is deliberately kept
+       as a legacy fallback for existing installations. */
+    if (g_app.config.username[0] != '\0' && g_app.config.password[0] != '\0') {
+        char token[CONFIG_MAX_KEY];
+        Result res = jellyfinAuthByPassword(g_app.config.serverUrl,
+            g_app.config.username, g_app.config.password, token, sizeof(token));
+        if (R_FAILED(res))
+            return res;
+        strncpy(g_app.authToken, token, sizeof(g_app.authToken) - 1);
+        g_app.authToken[sizeof(g_app.authToken) - 1] = '\0';
+        memset(token, 0, sizeof(token));
+        return 0;
+    }
+
+    if (g_app.config.apiKey[0] != '\0') {
+        strncpy(g_app.authToken, g_app.config.apiKey, sizeof(g_app.authToken) - 1);
+        g_app.authToken[sizeof(g_app.authToken) - 1] = '\0';
+        return 0;
+    }
+
+    if (g_app.config.username[0] == '\0')
+        return -1;
+
+    char password[CONFIG_MAX_PASSWORD];
+    if (!inputShowKeyboardPassword(password, sizeof(password), "Jellyfin password"))
+        return -1;
+
+    Result res = jellyfinAuthByPassword(g_app.config.serverUrl,
+        g_app.config.username, password, g_app.authToken, sizeof(g_app.authToken));
+    memset(password, 0, sizeof(password));
+    return res;
+}
+
 static void browserSetStatus(const char* fmt, ...)
 {
     va_list args;
@@ -128,7 +163,7 @@ static void browserDownloadProgress(size_t downloaded, size_t total)
 static Result browserDownloadSong(const char* itemId, const char* path)
 {
     char url[BROWSER_STREAM_URL_MAX];
-    Result res = jellyfinGetStreamUrl(g_app.config.serverUrl, g_app.config.apiKey,
+    Result res = jellyfinGetStreamUrl(g_app.config.serverUrl, appAuthToken(),
         itemId, url, sizeof(url));
     if (R_FAILED(res))
         return res;
@@ -226,7 +261,7 @@ static void browserLoadRootItems(void)
 
     char* json = NULL;
     size_t len = 0;
-    Result res = jellyfinGetViews(g_app.config.serverUrl, g_app.config.apiKey, &json, &len);
+    Result res = jellyfinGetViews(g_app.config.serverUrl, appAuthToken(), &json, &len);
     if (R_FAILED(res)) {
         browserSetStatus("Views failed: %08lX", (unsigned long)res);
         return;
@@ -293,29 +328,10 @@ void browserLoadRoot(void)
         return;
     }
 
-    if (g_app.config.apiKey[0] == '\0') {
-        if (g_app.config.username[0] == '\0') {
-            browserSetStatus("Set API key or username");
-            return;
-        }
-
-        char password[128];
-        if (!inputShowKeyboardPassword(password, sizeof(password), "Jellyfin password")) {
-            browserSetStatus("Password entry cancelled");
-            return;
-        }
-
-        char apiKey[CONFIG_MAX_KEY];
-        Result res = jellyfinAuthByPassword(g_app.config.serverUrl,
-            g_app.config.username, password, apiKey, sizeof(apiKey));
-        memset(password, 0, sizeof(password));
-        if (R_FAILED(res)) {
-            browserSetStatus("Auth failed: %08lX", (unsigned long)res);
-            return;
-        }
-
-        strncpy(g_app.config.apiKey, apiKey, CONFIG_MAX_KEY - 1);
-        g_app.config.apiKey[CONFIG_MAX_KEY - 1] = '\0';
+    Result authRes = browserEnsureAuthenticated();
+    if (R_FAILED(authRes)) {
+        browserSetStatus("Login failed: %08lX", (unsigned long)authRes);
+        return;
     }
 
     browserLoadRootItems();
@@ -332,7 +348,7 @@ void browserLoadItems(const char* parentId, ItemType type)
         s_state.currentId[0] = '\0';
     }
 
-    if (g_app.config.serverUrl[0] == '\0' || g_app.config.apiKey[0] == '\0') {
+    if (g_app.config.serverUrl[0] == '\0' || appAuthToken()[0] == '\0') {
         browserSetStatus("Not authenticated");
         return;
     }
@@ -360,7 +376,7 @@ void browserLoadItems(const char* parentId, ItemType type)
 
     char* json = NULL;
     size_t len = 0;
-    Result res = jellyfinGetItems(g_app.config.serverUrl, g_app.config.apiKey,
+    Result res = jellyfinGetItems(g_app.config.serverUrl, appAuthToken(),
         queryParentId, artistId, includeTypes, &json, &len);
     if (R_FAILED(res)) {
         browserSetStatus("Load failed: %08lX", (unsigned long)res);
@@ -418,6 +434,21 @@ void browserUpdate(void)
 {
     if (s_downloading)
         return;
+
+    if (g_app.touchDown) {
+        if (g_app.touch.py >= 210) {
+            if (g_app.touch.px < 110)
+                g_app.kDown |= KEY_B;
+            else if (g_app.touch.px >= 220)
+                g_app.kDown |= KEY_X;
+        } else if (g_app.touch.py >= 28 && g_app.touch.py < 205 && s_state.count > 0) {
+            int tapped = s_state.scroll + ((int)g_app.touch.py - 28) / 10;
+            if (tapped >= 0 && tapped < s_state.count) {
+                s_state.selected = tapped;
+                g_app.kDown |= KEY_A;
+            }
+        }
+    }
 
     if (g_app.kDown & KEY_UP) {
         s_state.selected--;
@@ -500,7 +531,7 @@ void browserUpdate(void)
 
 void browserRender(void)
 {
-    printf("Browser\n");
+    printf("\x1b[1;36mLIBRARY\x1b[0m\n");
 
     char path[256];
     path[0] = '\0';
@@ -509,7 +540,7 @@ void browserRender(void)
         strncat(path, "/", sizeof(path) - strlen(path) - 1);
         strncat(path, s_stack[i].name, sizeof(path) - strlen(path) - 1);
     }
-    printf("%s\n\n", path);
+    printf("%s\n", path);
 
     if (s_state.count <= 0) {
         printf("No items.\n");
@@ -529,12 +560,12 @@ void browserRender(void)
             case ITEM_TYPE_FOLDER: icon = "[F]"; break;
             default:               icon = "[?]"; break;
             }
-            printf("%s%s %.108s\n", marker, icon, s_state.items[i].name);
+            printf("%s %s %.108s\n", marker, icon, s_state.items[i].name);
         }
     }
 
-    printf("\nUP/DOWN: move, A: open/play\n");
-    printf("X: download, B: back, L/R: page\n");
+    printf("\nUP/DOWN: move  A: open/play  L/R: page\n");
+    printf("Touch item to open | B: back | X: download\n");
     if (s_status[0])
         printf("\n%s\n", s_status);
 }

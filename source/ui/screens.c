@@ -16,6 +16,7 @@ static int s_top = 0;
 typedef enum {
 	SET_SERVER_URL,
 	SET_USERNAME,
+	SET_PASSWORD,
 	SET_API_KEY,
 	SET_DISABLE_SSL,
 	SET_COUNT
@@ -98,6 +99,16 @@ static void settingsEdit(void)
 			s_status[0] = '\0';
 		}
 		break;
+	case SET_PASSWORD:
+		strncpy(buf, g_app.config.password, sizeof(buf) - 1);
+		buf[sizeof(buf) - 1] = '\0';
+		if (inputShowKeyboardPassword(buf, sizeof(buf), "Password")) {
+			strncpy(g_app.config.password, buf, CONFIG_MAX_PASSWORD - 1);
+			g_app.config.password[CONFIG_MAX_PASSWORD - 1] = '\0';
+			s_status[0] = '\0';
+		}
+		memset(buf, 0, sizeof(buf));
+		break;
 	case SET_API_KEY:
 		if (inputShowKeyboardPassword(buf, sizeof(buf), "API Key")) {
 			strncpy(g_app.config.apiKey, buf, CONFIG_MAX_KEY - 1);
@@ -132,6 +143,13 @@ void screenUpdate(void)
 
 		if (g_app.kDown & KEY_A)
 			settingsEdit();
+		if (g_app.touchDown && g_app.touch.py >= 35 && g_app.touch.py < 170) {
+			int row = ((int)g_app.touch.py - 35) / 25;
+			if (row >= 0 && row < SET_COUNT) {
+				s_settingSel = row;
+				settingsEdit();
+			}
+		}
 
 		if (g_app.kDown & KEY_X)
 			settingsTestConnection();
@@ -165,19 +183,24 @@ void screenRender(void)
 {
 	switch (g_app.current) {
 	case SCREEN_HOME:
-		printf("Home screen\n\n");
-		printf("A: Browser\n");
-		printf("SELECT: Settings\n");
-		printf("START: Quit\n");
+		printf("\x1b[1;36mJELLYFIN 3DS\x1b[0m\n");
+		printf("\x1b[90mYour music, on your 3DS\x1b[0m\n\n");
+		printf("+----------------+  +----------------+\n");
+		printf("|  [A] LIBRARY   |  | [SELECT] SETUP |\n");
+		printf("|  Browse music  |  | Server & login  |\n");
+		printf("+----------------+  +----------------+\n\n");
+		printf("Touch a card, or use A / SELECT\n");
+		printf("B: Player     START: Quit\n");
 		break;
 	case SCREEN_SETTINGS:
-		printf("Settings\n\n");
-		printf("%s Server URL: %s\n", s_settingSel == SET_SERVER_URL ? ">" : " ", g_app.config.serverUrl);
-		printf("%s Username:   %s\n", s_settingSel == SET_USERNAME ? ">" : " ", g_app.config.username);
-		printf("%s API Key:    %s\n", s_settingSel == SET_API_KEY ? ">" : " ", g_app.config.apiKey[0] ? "********" : "(empty)");
-		printf("%s Disable SSL verify: %s\n", s_settingSel == SET_DISABLE_SSL ? ">" : " ", g_app.config.disableSslVerify ? "Yes" : "No");
-		printf("\nUP/DOWN: select, A: edit\n");
-		printf("X: test connection, START: save, B: back\n");
+		printf("\x1b[1;36mSETUP & LOGIN\x1b[0m\n\n");
+		printf("%s Server URL : %.38s\n", s_settingSel == SET_SERVER_URL ? ">" : " ", g_app.config.serverUrl);
+		printf("%s Username   : %.38s\n", s_settingSel == SET_USERNAME ? ">" : " ", g_app.config.username);
+		printf("%s Password   : %s\n", s_settingSel == SET_PASSWORD ? ">" : " ", g_app.config.password[0] ? "********" : "(not set)");
+		printf("%s API key    : %s (legacy)\n", s_settingSel == SET_API_KEY ? ">" : " ", g_app.config.apiKey[0] ? "********" : "(empty)");
+		printf("%s SSL verify : %s\n", s_settingSel == SET_DISABLE_SSL ? ">" : " ", g_app.config.disableSslVerify ? "disabled" : "enabled");
+		printf("\nTouch a row or UP/DOWN + A to edit\n");
+		printf("X: test server  START: save  B: back\n");
 		if (s_status[0])
 			printf("\n%s\n", s_status);
 		break;

@@ -19,7 +19,10 @@ typedef struct {
 	bool running;
 	u32 kDown;
 	u32 kHeld;
+	bool touchDown;
+	touchPosition touch;
 	Config config;
+	char authToken[CONFIG_MAX_KEY];
 } AppContext;
 
 extern AppContext g_app;
@@ -28,5 +31,6 @@ void appInit(void);
 void appUpdate(void);
 void appRender(void);
 void appExit(void);
+const char* appAuthToken(void);
 
 #endif

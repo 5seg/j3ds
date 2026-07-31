@@ -5,11 +5,13 @@
 
 #define CONFIG_MAX_URL  256
 #define CONFIG_MAX_USER 64
+#define CONFIG_MAX_PASSWORD 128
 #define CONFIG_MAX_KEY  128
 
 typedef struct {
 	char serverUrl[CONFIG_MAX_URL];
 	char username[CONFIG_MAX_USER];
+	char password[CONFIG_MAX_PASSWORD];
 	char apiKey[CONFIG_MAX_KEY];
 	bool disableSslVerify;
 } Config;

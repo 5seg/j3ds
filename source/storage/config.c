@@ -45,6 +45,11 @@ bool configLoad(Config* cfg)
 		strncpy(cfg->username, json_string_value(val), CONFIG_MAX_USER - 1);
 	}
 
+	val = json_object_get(root, "password");
+	if (json_is_string(val)) {
+		strncpy(cfg->password, json_string_value(val), CONFIG_MAX_PASSWORD - 1);
+	}
+
 	val = json_object_get(root, "apiKey");
 	if (json_is_string(val)) {
 		strncpy(cfg->apiKey, json_string_value(val), CONFIG_MAX_KEY - 1);
@@ -69,6 +74,7 @@ bool configSave(const Config* cfg)
 
 	json_object_set_new(root, "serverUrl", json_string(cfg->serverUrl));
 	json_object_set_new(root, "username", json_string(cfg->username));
+	json_object_set_new(root, "password", json_string(cfg->password));
 	json_object_set_new(root, "apiKey", json_string(cfg->apiKey));
 	json_object_set_new(root, "disableSslVerify", json_boolean(cfg->disableSslVerify));
 

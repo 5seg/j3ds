@@ -67,6 +67,33 @@ jobs:
           text: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/j3ds.cia
           path: qrcode-j3ds.png
 
+      - name: Generate release notes with embedded QR code
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## Jellyfin 3DS ${{ github.ref_name }}
+
+          Nintendo 3DS / 2DS / New3DS 向け Jellyfin 音楽クライアントです。
+
+          ### インストール
+
+          `.cia` を FBI や godmode9 などでインストールし、HOME メニューから起動してください。
+          下記 QR コードを読み取ると、FBI 経由で直接 `.cia` をダウンロードできます。
+
+          ![QR Code for j3ds.cia](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/qrcode-j3ds.png)
+
+          ### ダウンロード
+
+          - [j3ds.cia](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/j3ds.cia)
+          - [j3ds.3dsx](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/j3ds.3dsx)
+
+          ### 使い方
+
+          - Home: A=ブラウザ, SELECT=設定, B=プレイヤー, START=終了
+          - 設定: ↑/↓=選択, A=編集, X=接続テスト, START=保存, B=戻る
+          - ブラウザ: ↑/↓=選択, A=下位階層/曲を再生, B=戻る, L/R=ページ
+          - プレイヤー: X=再生, Y=ポーズ/再開, B=停止して戻る
+          EOF
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -74,4 +101,4 @@ jobs:
             j3ds.3dsx
             j3ds.cia
             qrcode-j3ds.png
-          generate_release_notes: true
+          body_path: release-notes.md
