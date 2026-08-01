@@ -13,6 +13,7 @@
 #include "ui/gui.h"
 #include "ui/screens.h"
 #include "ui/thumbnail.h"
+#include "utils/debug.h"
 
 #define PLAYER_THUMB_X      80
 #define PLAYER_THUMB_Y      24
@@ -164,6 +165,9 @@ void playerUpdate(void)
     if (g_app.kDown & KEY_Y)
         audioPause();
 
+    if (g_app.kDown & KEY_SELECT)
+        debugToggle();
+
     if (s_queueCount > 1) {
         if (g_app.kDown & KEY_L)
             playerPlaySongAt((s_queueIndex + s_queueCount - 1) % s_queueCount);
@@ -198,11 +202,14 @@ void playerRenderTop(void)
         s_thumbLoading = false;
         s_thumbReady = false;
         s_thumbUrl[0] = '\0';
+        debugLog("thumb poll failed, retry=%d/3", s_thumbRetries + 1);
         if (++s_thumbRetries >= THUMB_MAX_RETRIES) {
             s_thumbGiveUp = true;
             s_thumbRetryDelay = 0;
+            debugSetThumbInfo(0, 0, 0, 0, 0, 0, 0, 0, 0, "GIVE UP");
         } else {
             s_thumbRetryDelay = THUMB_RETRY_DELAY_FRAMES;
+            debugSetThumbInfo(0, 0, 0, 0, 0, 0, 0, 0, 0, "RETRY");
         }
     }
 
@@ -223,10 +230,12 @@ void playerRenderTop(void)
     if (!s_thumbLoading && strcmp(s_thumbUrl, s_track.thumbnailUrl) != 0) {
         strncpy(s_thumbUrl, s_track.thumbnailUrl, sizeof(s_thumbUrl) - 1);
         s_thumbUrl[sizeof(s_thumbUrl) - 1] = '\0';
-        if (thumbnailLoadAsync(s_thumbUrl))
+        if (thumbnailLoadAsync(s_thumbUrl)) {
             s_thumbLoading = true;
-        else
+            debugSetThumbInfo(0, 0, 0, 0, 0, 0, 0, 0, 0, "LOADING");
+        } else {
             s_thumbUrl[0] = '\0'; /* busy; retry next frame */
+        }
     }
 
 draw:

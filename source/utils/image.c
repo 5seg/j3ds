@@ -101,8 +101,20 @@ bool imageLoadJpegRgba(const void* data, size_t size, int maxDim,
 }
 
 /* PICA200 tiled texture layout: the texture is divided into 8x8 pixel tiles.
-   Tiles are stored in row-major order, each tile holds 8x8 pixels in
-   row-major order. */
+   Tiles are stored in row-major order, but within each tile the pixels are
+   stored in Morton (Z-order) interleaved order, not row-major. This matches
+   what tex3ds produces and what the GPU expects when sampling a tiled
+   texture. */
+static inline u32 imageMorton3(u32 x, u32 y)
+{
+	u32 z = 0;
+	for (int i = 0; i < 3; i++) {
+		z |= ((x >> i) & 1) << (2 * i);
+		z |= ((y >> i) & 1) << (2 * i + 1);
+	}
+	return z;
+}
+
 void imageSwizzleRgba8(u32* rgba, int width, int height)
 {
 	if (!rgba || width <= 0 || height <= 0)
@@ -119,11 +131,9 @@ void imageSwizzleRgba8(u32* rgba, int width, int height)
 		for (int tx = 0; tx < tilesX; tx++) {
 			for (int yy = 0; yy < 8; yy++) {
 				for (int xx = 0; xx < 8; xx++) {
-					int srcX = tx * 8 + xx;
-					int srcY = ty * 8 + yy;
-					u32 px = rgba[(size_t)srcY * width + srcX];
+					u32 px = rgba[(size_t)(ty * 8 + yy) * width + tx * 8 + xx];
 					int dstIndex = ((size_t)(ty * tilesX + tx) * 64) +
-						(size_t)yy * 8 + xx;
+						(int)imageMorton3((u32)xx, (u32)yy);
 					tmp[dstIndex] = px;
 				}
 			}

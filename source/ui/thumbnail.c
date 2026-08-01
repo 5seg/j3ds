@@ -8,6 +8,7 @@
 
 #include "net/http.h"
 #include "sys/sd.h"
+#include "utils/debug.h"
 #include "utils/image.h"
 
 #define THUMB_CACHE_DIR "cache/thumbs"
@@ -233,6 +234,7 @@ static void thumbBgThread(void* arg)
 	struct stat st;
 	if (stat(path, &st) != 0) {
 		if (R_FAILED(httpDownloadFile(s_async.url, path))) {
+			debugLog("thumb dl fail: http=%d", httpLastStatus());
 			s_async.done = true;
 			return;
 		}
@@ -241,6 +243,7 @@ static void thumbBgThread(void* arg)
 	void* data = NULL;
 	size_t size = 0;
 	if (!thumbnailReadFile(path, &data, &size)) {
+		debugLog("thumb read fail");
 		s_async.done = true;
 		return;
 	}
@@ -248,6 +251,10 @@ static void thumbBgThread(void* arg)
 	s_async.ok = imageLoadJpegRgba(data, size, THUMB_MAX_SIZE, &s_async.rgba,
 		&s_async.srcW, &s_async.srcH);
 	free(data);
+	if (!s_async.ok)
+		debugLog("thumb decode fail");
+	else
+		debugLog("thumb decoded %dx%d", s_async.srcW, s_async.srcH);
 	s_async.done = true;
 }
 
@@ -336,5 +343,14 @@ ThumbnailStatus thumbnailPollReady(Thumbnail* out)
 	out->width = (int)entry->subtex.width;
 	out->height = (int)entry->subtex.height;
 	out->valid = true;
+
+	debugSetThumbInfo(0, (int)entry->subtex.width, (int)entry->subtex.height,
+		(int)entry->tex.width, (int)entry->tex.height,
+		entry->subtex.left, entry->subtex.top,
+		entry->subtex.right, entry->subtex.bottom, "READY");
+	debugLog("thumb texture %dx%d sub %.3f,%.3f,%.3f,%.3f",
+		(int)entry->tex.width, (int)entry->tex.height,
+		entry->subtex.left, entry->subtex.top,
+		entry->subtex.right, entry->subtex.bottom);
 	return THUMB_READY;
 }

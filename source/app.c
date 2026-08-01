@@ -13,6 +13,7 @@
 #include "storage/config.h"
 #include "net/http.h"
 #include "ui/thumbnail.h"
+#include "utils/debug.h"
 
 AppContext g_app;
 
@@ -34,6 +35,7 @@ void appInit(void)
 	browserInit();
 	playerInit();
 	screenInit();
+	debugInit();
 }
 
 void appUpdate(void)
@@ -89,6 +91,8 @@ void appRender(void)
 	else
 		screenRenderTop();
 
+	debugRenderOverlay();
+
 	/* Bottom screen: interactive UI. */
 	C2D_TargetClear(g_gui.bottom, GUI_COL_BG);
 	C2D_SceneBegin(g_gui.bottom);
@@ -101,4 +105,5 @@ void appExit(void)
 	thumbnailReleaseCache();
 	httpGlobalExit();
 	audioExit();
+	debugExit();
 }
