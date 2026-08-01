@@ -18,7 +18,7 @@ static void image_jpeg_error_exit(j_common_ptr cinfo)
 	longjmp(err->setjmp_buffer, 1);
 }
 
-bool imageLoadJpegRgba(const void* data, size_t size,
+bool imageLoadJpegRgba(const void* data, size_t size, int maxDim,
 	u32** outRgba, int* outW, int* outH)
 {
 	if (!data || size == 0 || !outRgba || !outW || !outH)
@@ -41,6 +41,21 @@ bool imageLoadJpegRgba(const void* data, size_t size,
 	if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
 		jpeg_destroy_decompress(&cinfo);
 		return false;
+	}
+
+	if (maxDim > 0) {
+		/* Pick the largest supported DCT scale factor (1/2, 1/4, 1/8) that
+		   keeps the larger edge at least maxDim, so the caller never
+		   upscales and never wastes time on full-size decoding. */
+		jpeg_calc_output_dimensions(&cinfo);
+		unsigned int longEdge = cinfo.output_width > cinfo.output_height
+			? cinfo.output_width : cinfo.output_height;
+		int denom = 1;
+		while (denom < 8 && (longEdge / (unsigned int)(denom * 2))
+			>= (unsigned int)maxDim)
+			denom *= 2;
+		cinfo.scale_num = 1;
+		cinfo.scale_denom = denom;
 	}
 
 	cinfo.out_color_space = JCS_RGB;
@@ -160,13 +175,18 @@ bool imageUploadToTexture(C3D_Tex* tex, const u32* rgba,
 	free(swizzled);
 	C3D_TexFlush(tex);
 
-	/* The subtexture covers only the real image, not the padding. */
+	/* The subtexture covers only the real image, not the padding. The
+	   PICA200 samples textures V-flipped (v=0 at the bottom of memory), so
+	   the top edge of the image sits at v=1.0 and `top` must stay larger
+	   than `bottom` or the Tex3DS helpers treat it as rotated. The right and
+	   bottom edges are inset by one texel so the linear filter never blends
+	   into the transparent padding. */
 	outSubtex->width = (u16)imgW;
 	outSubtex->height = (u16)imgH;
 	outSubtex->left = 0.0f;
-	outSubtex->top = 0.0f;
-	outSubtex->right = (float)imgW / (float)canvasW;
-	outSubtex->bottom = (float)imgH / (float)canvasH;
+	outSubtex->top = 1.0f;
+	outSubtex->right = (float)(imgW - 1) / (float)canvasW;
+	outSubtex->bottom = 1.0f - (float)(imgH - 1) / (float)canvasH;
 
 	out->tex = tex;
 	out->subtex = outSubtex;

@@ -7,8 +7,11 @@
 #include <citro2d.h>
 
 /* Decode a JPEG in memory into a linear RGBA8 buffer (upper-left origin).
-   Caller must free() the returned buffer. Returns false on error. */
-bool imageLoadJpegRgba(const void* data, size_t size,
+   If maxDim > 0 the decode is scaled down so the larger edge is at least
+   maxDim (never smaller) using libjpeg DCT scaling, which is far faster and
+   lighter than decoding full-size. Caller must free() the returned buffer.
+   Returns false on error. */
+bool imageLoadJpegRgba(const void* data, size_t size, int maxDim,
 	u32** outRgba, int* outW, int* outH);
 
 /* Convert a linear RGBA8 buffer into the 3DS GPU tiled layout in-place.

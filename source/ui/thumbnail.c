@@ -238,7 +238,7 @@ static void thumbBgThread(void* arg)
 		return;
 	}
 
-	s_async.ok = imageLoadJpegRgba(data, size, &s_async.rgba,
+	s_async.ok = imageLoadJpegRgba(data, size, THUMB_MAX_SIZE, &s_async.rgba,
 		&s_async.srcW, &s_async.srcH);
 	free(data);
 	s_async.done = true;
