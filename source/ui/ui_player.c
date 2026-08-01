@@ -24,6 +24,12 @@ static Thumbnail s_thumb;
 static bool s_thumbReady = false;
 static bool s_thumbLoading = false;
 
+static BrowserItem s_queue[BROWSER_MAX_ITEMS];
+static int s_queueCount = 0;
+static int s_queueIndex = 0;
+
+#define PLAYER_STREAM_URL_MAX 2048
+
 static void playerBuildAudioPath(const char* itemId, char* out, size_t outLen)
 {
     char root[256];
@@ -66,6 +72,49 @@ void playerSetTrack(const char* title, const char* artist, const char* album, co
     s_thumbUrl[0] = '\0';
 }
 
+void playerSetQueue(const BrowserItem* items, int count, int index)
+{
+    char target[64] = "";
+    if (items && index >= 0 && index < count)
+        snprintf(target, sizeof(target), "%s", items[index].id);
+
+    s_queueCount = 0;
+    s_queueIndex = 0;
+
+    if (!items || count <= 0)
+        return;
+
+    if (count > BROWSER_MAX_ITEMS)
+        count = BROWSER_MAX_ITEMS;
+
+    for (int i = 0; i < count; ++i) {
+        if (items[i].type != ITEM_TYPE_SONG)
+            continue;
+        s_queue[s_queueCount] = items[i];
+        if (target[0] && strcmp(s_queue[s_queueCount].id, target) == 0)
+            s_queueIndex = s_queueCount;
+        s_queueCount++;
+    }
+}
+
+Result playerPlaySongAt(int index)
+{
+    if (index < 0 || index >= s_queueCount)
+        return -1;
+
+    const BrowserItem* song = &s_queue[index];
+
+    char url[PLAYER_STREAM_URL_MAX];
+    Result res = jellyfinGetStreamUrl(g_app.config.serverUrl, appAuthToken(),
+        song->id, url, sizeof(url));
+    if (R_FAILED(res))
+        return res;
+
+    s_queueIndex = index;
+    playerSetTrack(song->name, song->artist, song->album, song->id);
+    return audioPlayStream(url);
+}
+
 void playerUpdate(void)
 {
 	if (g_app.touchDown && g_app.touch.py >= 185) {
@@ -95,6 +144,13 @@ void playerUpdate(void)
 
     if (g_app.kDown & KEY_Y)
         audioPause();
+
+    if (s_queueCount > 1) {
+        if (g_app.kDown & KEY_L)
+            playerPlaySongAt((s_queueIndex + s_queueCount - 1) % s_queueCount);
+        if (g_app.kDown & KEY_R)
+            playerPlaySongAt((s_queueIndex + 1) % s_queueCount);
+    }
 
     if (g_app.kDown & KEY_B) {
         audioStop();
@@ -142,6 +198,11 @@ void playerRender(void)
     guiRect(0, 0, GUI_BOT_W, 30, GUI_COL_HEADER);
     guiRect(0, 28, GUI_BOT_W, 2, GUI_COL_SELECT);
     guiText("NOW PLAYING", 10, 6, 0.6f, GUI_COL_TEXT);
+    if (s_queueCount > 1) {
+        char pos[32];
+        snprintf(pos, sizeof(pos), "%d/%d", s_queueIndex + 1, s_queueCount);
+        guiTextRight(pos, GUI_BOT_W - 10, 9, 0.45f, GUI_COL_MUTED);
+    }
 
     /* Status pill. */
     const char* status = audioIsPaused() ? "PAUSED"
@@ -164,6 +225,10 @@ void playerRender(void)
     /* Hint bar. */
     guiRect(0, 210, GUI_BOT_W, 30, GUI_COL_HEADER);
     guiRect(0, 210, GUI_BOT_W, 1, GUI_COL_DIM);
-    guiTextCentered("B: Stop & home   X: Play   Y: Pause", GUI_BOT_W / 2.0f, 218,
-        0.4f, GUI_COL_MUTED);
+    if (s_queueCount > 1)
+        guiTextCentered("L/R: Prev/Next   B: Stop   X: Play   Y: Pause",
+            GUI_BOT_W / 2.0f, 218, 0.4f, GUI_COL_MUTED);
+    else
+        guiTextCentered("B: Stop & home   X: Play   Y: Pause", GUI_BOT_W / 2.0f,
+            218, 0.4f, GUI_COL_MUTED);
 }

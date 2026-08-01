@@ -6,7 +6,7 @@
 
 #include "storage/config.h"
 
-#define APP_VERSION "0.1.12"
+#define APP_VERSION "0.1.13"
 
 typedef enum {
 	SCREEN_HOME,

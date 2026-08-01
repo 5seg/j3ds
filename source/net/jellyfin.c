@@ -125,7 +125,7 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 	char auth[JF_AUTH_HEADER_MAX];
 	snprintf(auth, sizeof(auth),
 		"MediaBrowser Client=\"Jellyfin3DS\", Device=\"Nintendo 3DS\", "
-		"DeviceId=\"j3ds-3ds\", Version=\"0.1.12\"");
+		"DeviceId=\"j3ds-3ds\", Version=\"0.1.13\"");
 
 	HttpHeader headers[] = {
 		{ "Content-Type", "application/json" },
@@ -263,8 +263,8 @@ Result jellyfinGetStreamUrl(const char* serverUrl, const char* apiKey, const cha
 	   original file (Static=true) serves e.g. FLAC bytes, which mpg123 on
 	   the 3DS cannot decode. */
 	int n = snprintf(out, outLen,
-		"%s/Audio/%s/stream?Container=mp3&audioCodec=mp3&audioBitRate=96000"
-		"&maxAudioBitRate=96000&transcodingContainer=mp3"
+		"%s/Audio/%s/stream?Container=mp3&audioCodec=mp3&audioBitRate=128000"
+		"&maxAudioBitRate=128000&transcodingContainer=mp3"
 		"&transcodingProtocol=http&deviceId=j3ds-%s&ApiKey=%s",
 		base, itemId ? itemId : "", APP_VERSION, apiKey ? apiKey : "");
 	if (n < 0 || (size_t)n >= outLen)
