@@ -7,7 +7,7 @@
 
 #include "app.h"
 
-#define HTTP_MAX_URL        1024
+#define HTTP_MAX_URL        2048
 #define HTTP_CHUNK_SIZE     4096
 #define HTTP_MAX_REDIRECTS  8
 
@@ -244,6 +244,81 @@ Result httpPostWithHeaders(const char* url, const char* body, const HttpHeader* 
 Result httpDownloadFile(const char* url, const char* path)
 {
 	return httpDownloadFileWithProgress(url, path, NULL);
+}
+
+Result httpDownloadToSink(const char* url, HttpChunkSink sink, void* user)
+{
+	if (!url || !sink || strlen(url) >= HTTP_MAX_URL)
+		return HTTP_ERR_GENERIC;
+
+	char* redirectUrl = (char*)malloc(HTTP_MAX_URL);
+	if (!redirectUrl)
+		return HTTP_ERR_GENERIC;
+	redirectUrl[0] = '\0';
+
+	const char* currentUrl = url;
+	int redirects = 0;
+	Result ret = 0;
+	httpcContext context;
+
+	while (true) {
+		u32 status = 0;
+		ret = httpRequest(&context, HTTPC_METHOD_GET, currentUrl, NULL, NULL, 0, &status);
+		if (R_FAILED(ret)) {
+			free(redirectUrl);
+			return ret;
+		}
+
+		if ((status >= 301 && status <= 303) || (status >= 307 && status <= 308)) {
+			if (redirects >= HTTP_MAX_REDIRECTS) {
+				httpcCloseContext(&context);
+				free(redirectUrl);
+				return HTTP_ERR_TOO_MANY_REDIRECTS;
+			}
+
+			ret = httpcGetResponseHeader(&context, "Location", redirectUrl, HTTP_MAX_URL);
+			httpcCloseContext(&context);
+			if (R_FAILED(ret)) {
+				free(redirectUrl);
+				return ret;
+			}
+			redirectUrl[HTTP_MAX_URL - 1] = '\0';
+			currentUrl = redirectUrl;
+			redirects++;
+			continue;
+		}
+
+		if (status != 200) {
+			httpcCloseContext(&context);
+			free(redirectUrl);
+			s_lastStatus = (int)status;
+			return HTTP_ERR_STATUS;
+		}
+
+		u8 buf[HTTP_CHUNK_SIZE];
+		u32 read = 0;
+		Result downloadRet = 0;
+		bool abort = false;
+
+		do {
+			downloadRet = httpcDownloadData(&context, buf, sizeof(buf), &read);
+			if (read > 0) {
+				if (!sink(buf, read, user)) {
+					abort = true;
+					break;
+				}
+			}
+		} while (downloadRet == (s32)HTTPC_RESULTCODE_DOWNLOADPENDING);
+
+		httpcCloseContext(&context);
+		free(redirectUrl);
+
+		if (abort)
+			return HTTP_ERR_GENERIC;
+		if (R_FAILED(downloadRet))
+			return downloadRet;
+		return 0;
+	}
 }
 
 Result httpDownloadFileWithProgress(const char* url, const char* path,

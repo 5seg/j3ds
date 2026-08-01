@@ -7,6 +7,7 @@
 Result audioInit(void);
 void audioExit(void);
 Result audioPlay(const char* path);
+Result audioPlayStream(const char* url);
 void audioPause(void);
 void audioStop(void);
 bool audioIsPlaying(void);

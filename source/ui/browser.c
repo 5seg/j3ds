@@ -245,21 +245,18 @@ static void browserUpdateScroll(void)
 
 static void browserPlaySong(const BrowserItem* song)
 {
-    char path[512];
-    browserBuildAudioPath(song->id, path, sizeof(path));
-
-    if (access(path, F_OK) != 0) {
-        Result res = browserDownloadSong(song->id, path);
-        if (R_FAILED(res)) {
-            browserSetStatus("Download failed: %08lX", (unsigned long)res);
-            return;
-        }
+    char url[BROWSER_STREAM_URL_MAX];
+    Result res = jellyfinGetStreamUrl(g_app.config.serverUrl, appAuthToken(),
+        song->id, url, sizeof(url));
+    if (R_FAILED(res)) {
+        browserSetStatus("Stream URL failed: %08lX", (unsigned long)res);
+        return;
     }
 
     playerSetTrack(song->name, song->artist, song->album, song->id);
     screenChange(SCREEN_PLAYER);
 
-    Result res = audioPlay(path);
+    res = audioPlayStream(url);
     if (R_FAILED(res))
         browserSetStatus("Play failed: %08lX", (unsigned long)res);
 }

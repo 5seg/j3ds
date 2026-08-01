@@ -12,7 +12,7 @@
 #define JF_URL_MAX 1024
 #define JF_FULL_URL_MAX 2048
 #define JF_AUTH_HEADER_MAX 512
-#define JF_HTTP_MAX_URL 1024
+#define JF_HTTP_MAX_URL 2048
 
 static void normalizeServerUrl(const char* in, char* out, size_t outLen)
 {
@@ -125,7 +125,7 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 	char auth[JF_AUTH_HEADER_MAX];
 	snprintf(auth, sizeof(auth),
 		"MediaBrowser Client=\"Jellyfin3DS\", Device=\"Nintendo 3DS\", "
-		"DeviceId=\"j3ds-3ds\", Version=\"0.1.10\"");
+		"DeviceId=\"j3ds-3ds\", Version=\"0.1.11\"");
 
 	HttpHeader headers[] = {
 		{ "Content-Type", "application/json" },
@@ -259,8 +259,13 @@ Result jellyfinGetStreamUrl(const char* serverUrl, const char* apiKey, const cha
 	if (base[0] == '\0')
 		return -1;
 
+	/* Force Jellyfin to transcode any source format to MP3. Streaming the
+	   original file (Static=true) serves e.g. FLAC bytes, which mpg123 on
+	   the 3DS cannot decode. */
 	int n = snprintf(out, outLen,
-		"%s/Audio/%s/stream?Container=mp3&Static=true&ApiKey=%s",
+		"%s/Audio/%s/stream?Container=mp3&audioCodec=mp3&audioBitRate=160000"
+		"&maxAudioBitRate=160000&transcodingContainer=mp3"
+		"&transcodingProtocol=http&ApiKey=%s",
 		base, itemId ? itemId : "", apiKey ? apiKey : "");
 	if (n < 0 || (size_t)n >= outLen)
 		return -1;

@@ -36,4 +36,9 @@ Result httpDownloadFileWithProgress(const char* url, const char* path,
 	HttpDownloadProgress progress);
 Result httpDownloadFile(const char* url, const char* path);
 
+/* Stream a download to a sink callback. sink returns true to continue,
+   false to abort. Used for progressive audio playback. */
+typedef bool (*HttpChunkSink)(const void* data, size_t size, void* user);
+Result httpDownloadToSink(const char* url, HttpChunkSink sink, void* user);
+
 #endif
