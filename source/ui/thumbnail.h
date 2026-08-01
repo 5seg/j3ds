@@ -12,10 +12,17 @@ typedef struct {
 	int height;
 } Thumbnail;
 
-/* Load a thumbnail from a Jellyfin image URL (with SD cache).
-   Textures are owned by an internal cache: the returned C2D_Image stays
-   valid until thumbnailReleaseCache() is called. Returns false on error. */
-bool thumbnailLoad(const char* url, Thumbnail* out);
+/* Start loading a thumbnail from a Jellyfin image URL in the background
+   (download + JPEG decode). Texture upload must happen on the render
+   thread, so it is deferred until thumbnailPollReady(). Returns false if
+   a load is already in progress or the URL is empty. */
+bool thumbnailLoadAsync(const char* url);
+
+/* Called from the render thread each frame. Returns true when the load
+   finished and *out is valid (or the load failed). Call repeatedly until
+   it returns true. Textures are owned by an internal cache and stay valid
+   until thumbnailReleaseCache(). */
+bool thumbnailPollReady(Thumbnail* out);
 
 /* Free all textures held by the internal cache. Call on app exit. */
 void thumbnailReleaseCache(void);

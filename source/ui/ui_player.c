@@ -22,6 +22,7 @@ static CurrentTrack s_track;
 static char s_thumbUrl[512] = "";
 static Thumbnail s_thumb;
 static bool s_thumbReady = false;
+static bool s_thumbLoading = false;
 
 static void playerBuildAudioPath(const char* itemId, char* out, size_t outLen)
 {
@@ -61,6 +62,7 @@ void playerSetTrack(const char* title, const char* artist, const char* album, co
     }
 
     s_thumbReady = false;
+    s_thumbLoading = false;
     s_thumbUrl[0] = '\0';
 }
 
@@ -105,10 +107,22 @@ void playerRenderTop(void)
     if (s_track.thumbnailUrl[0] == '\0')
         return;
 
-    if (!s_thumbReady && strcmp(s_thumbUrl, s_track.thumbnailUrl) != 0) {
+    /* Resolve a pending background load (download + decode on a worker
+       thread, texture upload here on the render thread). */
+    if (thumbnailPollReady(&s_thumb)) {
+        s_thumbLoading = false;
+        if (strcmp(s_thumbUrl, s_track.thumbnailUrl) == 0)
+            s_thumbReady = s_thumb.valid;
+        else
+            s_thumbReady = false;
+    }
+
+    /* Kick off a load for a new URL. */
+    if (!s_thumbReady && !s_thumbLoading
+        && strcmp(s_thumbUrl, s_track.thumbnailUrl) != 0) {
         strncpy(s_thumbUrl, s_track.thumbnailUrl, sizeof(s_thumbUrl) - 1);
         s_thumbUrl[sizeof(s_thumbUrl) - 1] = '\0';
-        s_thumbReady = thumbnailLoad(s_thumbUrl, &s_thumb);
+        s_thumbLoading = thumbnailLoadAsync(s_thumbUrl);
     }
 
     if (!s_thumbReady || !s_thumb.valid)

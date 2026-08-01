@@ -156,27 +156,111 @@ void thumbnailReleaseCache(void)
 	s_cacheCount = 0;
 }
 
-bool thumbnailLoad(const char* url, Thumbnail* out)
-{
-	if (!url || url[0] == '\0' || !out)
-		return false;
+typedef struct {
+	Thread thread;
+	volatile bool done;
+	bool ok;
+	bool cached;
+	unsigned int hash;
+	char url[512];
+	u32* rgba;
+	int srcW;
+	int srcH;
+	Thumbnail result;
+} AsyncThumb;
 
-	memset(out, 0, sizeof(*out));
+static AsyncThumb s_async;
+
+static void thumbBgThread(void* arg)
+{
+	(void)arg;
+
+	char root[512];
+	sdPath(root, sizeof(root), "");
+
+	char path[512];
+	int n = snprintf(path, sizeof(path), "%s/cache/thumbs/", root);
+	if (n < 0 || (size_t)n >= sizeof(path)) {
+		s_async.done = true;
+		return;
+	}
+	snprintf(path + n, sizeof(path) - n, "%08x.jpg", s_async.hash);
+
+	struct stat st;
+	if (stat(path, &st) != 0) {
+		if (R_FAILED(httpDownloadFile(s_async.url, path))) {
+			s_async.done = true;
+			return;
+		}
+	}
+
+	void* data = NULL;
+	size_t size = 0;
+	if (!thumbnailReadFile(path, &data, &size)) {
+		s_async.done = true;
+		return;
+	}
+
+	s_async.ok = imageLoadJpegRgba(data, size, &s_async.rgba,
+		&s_async.srcW, &s_async.srcH);
+	free(data);
+	s_async.done = true;
+}
+
+bool thumbnailLoadAsync(const char* url)
+{
+	if (!url || url[0] == '\0' || s_async.done)
+		return false;
 
 	if (!thumbnailEnsureCacheDir())
 		return false;
 
-	unsigned int hash = thumbnailHashUrl(url);
+	memset(&s_async, 0, sizeof(s_async));
+	strncpy(s_async.url, url, sizeof(s_async.url) - 1);
+	s_async.url[sizeof(s_async.url) - 1] = '\0';
 
-	/* Reuse a texture already decoded for the same URL. */
-	ThumbnailCacheEntry* cached = thumbnailFindCached(hash);
+	s_async.hash = thumbnailHashUrl(url);
+
+	ThumbnailCacheEntry* cached = thumbnailFindCached(s_async.hash);
 	if (cached) {
-		out->image = cached->image;
-		out->valid = true;
+		s_async.cached = true;
+		s_async.result.image = cached->image;
+		s_async.result.valid = true;
+		s_async.done = true;
 		return true;
 	}
 
-	/* Evict oldest entry if the cache is full. */
+	s_async.thread = threadCreate(thumbBgThread, NULL, 32 * 1024, 0x31, -1, false);
+	if (!s_async.thread)
+		return false;
+
+	return true;
+}
+
+bool thumbnailPollReady(Thumbnail* out)
+{
+	if (!out || !s_async.done)
+		return false;
+
+	if (s_async.thread) {
+		threadJoin(s_async.thread, UINT64_MAX);
+		threadFree(s_async.thread);
+		s_async.thread = NULL;
+	}
+
+	s_async.done = false;
+
+	if (s_async.cached) {
+		*out = s_async.result;
+		s_async.cached = false;
+		return out->valid;
+	}
+
+	if (!s_async.ok || !s_async.rgba) {
+		s_async.ok = false;
+		return false;
+	}
+
 	if (s_cacheCount >= (int)(sizeof(s_cache) / sizeof(s_cache[0]))) {
 		imageFreeTexture(&s_cache[0].tex);
 		for (int i = 0; i < s_cacheCount - 1; ++i)
@@ -184,44 +268,13 @@ bool thumbnailLoad(const char* url, Thumbnail* out)
 		s_cacheCount--;
 	}
 
-	char root[512];
-	sdPath(root, sizeof(root), "");
-
-	char path[512];
-	int n = snprintf(path, sizeof(path), "%s/cache/thumbs/", root);
-	if (n < 0 || (size_t)n >= sizeof(path))
-		return false;
-	snprintf(path + n, sizeof(path) - n, "%08x.jpg", hash);
-
-	struct stat st;
-	bool hasCache = (stat(path, &st) == 0);
-
-	if (!hasCache) {
-		Result res = httpDownloadFile(url, path);
-		if (R_FAILED(res))
-			return false;
-	}
-
-	void* data = NULL;
-	size_t size = 0;
-	if (!thumbnailReadFile(path, &data, &size))
-		return false;
-
-	u32* rgba = NULL;
-	int srcW = 0, srcH = 0;
-	bool ok = imageLoadJpegRgba(data, size, &rgba, &srcW, &srcH);
-	free(data);
-
-	if (!ok || !rgba) {
-		free(rgba);
-		return false;
-	}
-
 	ThumbnailCacheEntry* entry = &s_cache[s_cacheCount];
 	memset(entry, 0, sizeof(*entry));
-	entry->hash = hash;
-	ok = thumbnailBuildTexture(rgba, srcW, srcH, entry);
-	free(rgba);
+	entry->hash = s_async.hash;
+	bool ok = thumbnailBuildTexture(s_async.rgba, s_async.srcW, s_async.srcH, entry);
+	free(s_async.rgba);
+	s_async.rgba = NULL;
+	s_async.ok = false;
 
 	if (!ok) {
 		imageFreeTexture(&entry->tex);

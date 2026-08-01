@@ -10,6 +10,7 @@
 #define HTTP_MAX_URL        2048
 #define HTTP_CHUNK_SIZE     4096
 #define HTTP_MAX_REDIRECTS  8
+#define HTTP_TIMEOUT_NS     (10ULL * 1000 * 1000 * 1000)
 
 #define HTTP_ERR_GENERIC    ((Result)-1)
 #define HTTP_ERR_TOO_MANY_REDIRECTS ((Result)-3)
@@ -19,6 +20,22 @@ static int s_lastStatus = 0;
 int httpLastStatus(void)
 {
 	return s_lastStatus;
+}
+
+static Result httpReadChunk(httpcContext* context, u8* buf, u32 size, u64 timeout,
+	u32* read)
+{
+	u32 before = 0;
+	u32 total = 0;
+	httpcGetDownloadSizeState(context, &before, &total);
+
+	Result ret = httpcReceiveDataTimeout(context, buf, size, timeout);
+
+	u32 after = 0;
+	httpcGetDownloadSizeState(context, &after, &total);
+	*read = after > before ? after - before : 0;
+
+	return ret;
 }
 
 static Result httpReadResponse(httpcContext* context, char** out, size_t* outLen)
@@ -32,7 +49,8 @@ static Result httpReadResponse(httpcContext* context, char** out, size_t* outLen
 
 	while (true) {
 		u32 read = 0;
-		ret = httpcDownloadData(context, (u8*)(buf + size), HTTP_CHUNK_SIZE, &read);
+		ret = httpReadChunk(context, (u8*)(buf + size), HTTP_CHUNK_SIZE,
+			HTTP_TIMEOUT_NS, &read);
 		size += read;
 
 		if (ret == (s32)HTTPC_RESULTCODE_DOWNLOADPENDING) {
@@ -122,7 +140,7 @@ static Result httpRequest(httpcContext* context, HTTPC_RequestMethod method, con
 	if (R_FAILED(ret))
 		goto cleanup;
 
-	ret = httpcGetResponseStatusCode(context, statusOut);
+	ret = httpcGetResponseStatusCodeTimeout(context, statusOut, HTTP_TIMEOUT_NS);
 	if (R_FAILED(ret))
 		goto cleanup;
 
@@ -301,7 +319,8 @@ Result httpDownloadToSink(const char* url, HttpChunkSink sink, void* user)
 		bool abort = false;
 
 		do {
-			downloadRet = httpcDownloadData(&context, buf, sizeof(buf), &read);
+			downloadRet = httpReadChunk(&context, buf, sizeof(buf),
+				HTTP_TIMEOUT_NS, &read);
 			if (read > 0) {
 				if (!sink(buf, read, user)) {
 					abort = true;
@@ -392,7 +411,8 @@ Result httpDownloadFileWithProgress(const char* url, const char* path,
 		httpcGetDownloadSizeState(&context, &downloadedSize, &totalSize);
 
 		do {
-			downloadRet = httpcDownloadData(&context, buf, sizeof(buf), &read);
+			downloadRet = httpReadChunk(&context, buf, sizeof(buf),
+				HTTP_TIMEOUT_NS, &read);
 			if (read > 0) {
 				if (fwrite(buf, 1, read, f) != read) {
 					writeErr = true;

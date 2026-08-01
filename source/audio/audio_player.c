@@ -13,8 +13,8 @@
 
 #define AUDIO_PATH_TEST "/3ds/j3ds/cache/audio/test.mp3"
 
-#define STREAM_CAP       (256 * 1024)
-#define STREAM_PREBUF    (96 * 1024)
+#define STREAM_CAP       (512 * 1024)
+#define STREAM_PREBUF    (48 * 1024)
 #define STREAM_URL_MAX   2048
 
 typedef enum {
@@ -92,8 +92,13 @@ static size_t streamPush(StreamSource* s, const u8* data, size_t size)
 	if (n > s->cap - s->count)
 		n = s->cap - s->count;
 
-	for (size_t i = 0; i < n; ++i)
-		s->data[(s->head + s->count + i) % s->cap] = data[i];
+	size_t write = (s->head + s->count) % s->cap;
+	size_t first = n;
+	if (first > s->cap - write)
+		first = s->cap - write;
+	memcpy(s->data + write, data, first);
+	if (first < n)
+		memcpy(s->data, data + first, n - first);
 	s->count += n;
 
 	LightEvent_Signal(&s->event);
@@ -116,8 +121,12 @@ static size_t streamPop(StreamSource* s, u8* out, size_t size)
 	}
 
 	size_t n = size < s->count ? size : s->count;
-	for (size_t i = 0; i < n; ++i)
-		out[i] = s->data[(s->head + i) % s->cap];
+	size_t first = n;
+	if (first > s->cap - s->head)
+		first = s->cap - s->head;
+	memcpy(out, s->data + s->head, first);
+	if (first < n)
+		memcpy(out + first, s->data, n - first);
 	s->head = (s->head + n) % s->cap;
 	s->count -= n;
 
@@ -182,7 +191,8 @@ static void audioCallback(void* arg)
 static bool fillBuffer(Mp3Decoder* dec, ndspWaveBuf* waveBuf)
 {
 	int totalBytes = 0;
-	const int maxBytes = (int)waveBuf->nsamples * (int)sizeof(int16_t);
+	const int maxBytes = (int)waveBuf->nsamples * (int)s_dec.channels
+		* (int)sizeof(int16_t);
 
 	while (totalBytes < maxBytes) {
 		int16_t* buffer = waveBuf->data_pcm16 + (totalBytes / sizeof(int16_t));
@@ -204,7 +214,7 @@ static bool fillBuffer(Mp3Decoder* dec, ndspWaveBuf* waveBuf)
 		return false;
 	}
 
-	waveBuf->nsamples = (size_t)(totalBytes / sizeof(int16_t));
+	waveBuf->nsamples = (size_t)(totalBytes / sizeof(int16_t)) / (size_t)s_dec.channels;
 	ndspChnWaveBufAdd(0, waveBuf);
 	DSP_FlushDataCache(waveBuf->data_pcm16, (u32)totalBytes);
 
@@ -240,7 +250,7 @@ static void audioRunPlayback(void)
 	int16_t* buffer = s_audioBuffer;
 	for (size_t i = 0; i < ARRAY_SIZE(s_waveBufs); ++i) {
 		s_waveBufs[i].data_vaddr = buffer;
-		s_waveBufs[i].nsamples = waveBufSize / sizeof(int16_t);
+		s_waveBufs[i].nsamples = waveBufSize / sizeof(int16_t) / channels;
 		s_waveBufs[i].status = NDSP_WBUF_DONE;
 		buffer += waveBufSize / sizeof(int16_t);
 	}
@@ -312,7 +322,7 @@ static void audioStartThread(void (*entry)(void*))
 
 	int32_t priority = 0x30;
 	svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
-	priority -= 1;
+	priority += 1;
 	priority = priority < 0x18 ? 0x18 : priority;
 	priority = priority > 0x3F ? 0x3F : priority;
 
@@ -361,7 +371,7 @@ Result audioPlayStream(const char* url)
 	s_state = PLAYER_STOPPED;
 	s_quit = false;
 
-	s_dlThread = threadCreate(downloadThread, NULL, THREAD_STACK_SZ, 0x3F,
+	s_dlThread = threadCreate(downloadThread, NULL, THREAD_STACK_SZ, 0x32,
 		THREAD_AFFINITY, false);
 	if (!s_dlThread) {
 		streamFree(&s_stream);
