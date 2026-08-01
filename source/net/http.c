@@ -16,10 +16,21 @@
 #define HTTP_ERR_TOO_MANY_REDIRECTS ((Result)-3)
 
 static int s_lastStatus = 0;
+static bool s_cancelRequested = false;
 
 int httpLastStatus(void)
 {
 	return s_lastStatus;
+}
+
+void httpSetCancel(bool cancel)
+{
+	s_cancelRequested = cancel;
+}
+
+bool httpCancelRequested(void)
+{
+	return s_cancelRequested;
 }
 
 static Result httpReadChunk(httpcContext* context, u8* buf, u32 size, u64 timeout,
@@ -417,6 +428,14 @@ Result httpDownloadFileWithProgress(const char* url, const char* path,
 		httpcGetDownloadSizeState(&context, &downloadedSize, &totalSize);
 
 		do {
+			if (s_cancelRequested) {
+				httpcCloseContext(&context);
+				free(redirectUrl);
+				fclose(f);
+				s_cancelRequested = false;
+				return HTTP_ERR_CANCELLED;
+			}
+
 			downloadRet = httpReadChunk(&context, buf, sizeof(buf),
 				HTTP_TIMEOUT_NS, &read);
 			if (read > 0) {

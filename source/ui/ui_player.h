@@ -25,6 +25,9 @@ void playerSetTrack(const char* title, const char* artist, const char* album,
    Copies the items, so the caller may reuse its list afterwards. */
 void playerSetQueue(const BrowserItem* items, int count, int index);
 
+/* Index (into the song-only queue) of the currently selected/playing track. */
+int playerQueueIndex(void);
+
 /* Play the song at the given queue index. Sets track info, builds the
    stream URL and starts playback. */
 Result playerPlaySongAt(int index);

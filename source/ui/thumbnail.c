@@ -211,111 +211,63 @@ void thumbnailReleaseCache(void)
 	s_cacheCount = 0;
 }
 
-typedef struct {
-	Thread thread;
-	volatile bool done;
-	bool ok;
-	bool cached;
-	unsigned int hash;
-	char url[512];
-	u32* rgba;
-	int srcW;
-	int srcH;
-	Thumbnail result;
-} AsyncThumb;
-
-static AsyncThumb s_async;
-
-static void thumbBgThread(void* arg)
+static bool thumbnailUseEntry(ThumbnailCacheEntry* entry, Thumbnail* out)
 {
-	(void)arg;
-
-	char path[512];
-	thumbnailCachePath(s_async.hash, path, sizeof(path));
-
-	struct stat st;
-	if (stat(path, &st) != 0) {
-		if (R_FAILED(httpDownloadFile(s_async.url, path))) {
-			debugLog("thumb dl fail: http=%d", httpLastStatus());
-			s_async.done = true;
-			return;
-		}
-	}
-
-	void* data = NULL;
-	size_t size = 0;
-	if (!thumbnailReadFile(path, &data, &size)) {
-		debugLog("thumb read fail");
-		s_async.done = true;
-		return;
-	}
-
-	s_async.ok = imageLoadJpegRgba(data, size, THUMB_MAX_SIZE, &s_async.rgba,
-		&s_async.srcW, &s_async.srcH);
-	free(data);
-	if (!s_async.ok)
-		debugLog("thumb decode fail");
-	else
-		debugLog("thumb decoded %dx%d", s_async.srcW, s_async.srcH);
-	s_async.done = true;
-}
-
-bool thumbnailLoadAsync(const char* url)
-{
-	if (!url || url[0] == '\0' || s_async.thread)
+	if (!entry || !out || !entry->loaded)
 		return false;
 
-	if (!thumbnailEnsureCacheDir())
-		return false;
-
-	memset(&s_async, 0, sizeof(s_async));
-	strncpy(s_async.url, url, sizeof(s_async.url) - 1);
-	s_async.url[sizeof(s_async.url) - 1] = '\0';
-
-	s_async.hash = thumbnailHashUrl(url);
-
-	ThumbnailCacheEntry* cached = thumbnailFindCached(s_async.hash);
-	if (cached) {
-		s_async.cached = true;
-		s_async.result.image = cached->image;
-		s_async.result.width = (int)cached->subtex.width;
-		s_async.result.height = (int)cached->subtex.height;
-		s_async.result.valid = true;
-		s_async.done = true;
-		return true;
-	}
-
-	s_async.thread = threadCreate(thumbBgThread, NULL, 32 * 1024, 0x31, -1, false);
-	if (!s_async.thread)
-		return false;
-
+	out->image = entry->image;
+	out->width = (int)entry->subtex.width;
+	out->height = (int)entry->subtex.height;
+	out->valid = true;
 	return true;
 }
 
-ThumbnailStatus thumbnailPollReady(Thumbnail* out)
+bool thumbnailLoad(const char* url, Thumbnail* out)
 {
-	if (!out || !s_async.done)
-		return THUMB_LOADING;
+	if (!url || url[0] == '\0' || !out || !thumbnailEnsureCacheDir())
+		return false;
 
-	if (s_async.thread) {
-		threadJoin(s_async.thread, UINT64_MAX);
-		threadFree(s_async.thread);
-		s_async.thread = NULL;
+	memset(out, 0, sizeof(*out));
+	unsigned int hash = thumbnailHashUrl(url);
+	ThumbnailCacheEntry* cached = thumbnailFindCached(hash);
+	if (cached)
+		return thumbnailUseEntry(cached, out);
+
+	char path[512];
+	thumbnailCachePath(hash, path, sizeof(path));
+	u32* rgba = NULL;
+	int srcW = 0, srcH = 0;
+	bool decoded = false;
+
+	for (int attempt = 0; attempt < 2 && !decoded; ++attempt) {
+		struct stat st;
+		if (attempt > 0 || stat(path, &st) != 0) {
+			Result dl = httpDownloadFile(url, path);
+			if (R_FAILED(dl)) {
+				debugLog("thumb dl fail: hash=%08x try=%d ret=0x%08X http=%d",
+					hash, attempt + 1, (unsigned int)dl, httpLastStatus());
+				thumbnailDeleteCache(hash);
+				continue;
+			}
+		}
+
+		void* data = NULL;
+		size_t size = 0;
+		if (thumbnailReadFile(path, &data, &size)) {
+			decoded = imageLoadJpegRgba(data, size, THUMB_MAX_SIZE, &rgba,
+				&srcW, &srcH);
+			free(data);
+		}
+		if (!decoded) {
+			debugLog("thumb decode/read fail: hash=%08x try=%d",
+				hash, attempt + 1);
+			thumbnailDeleteCache(hash);
+		}
 	}
 
-	s_async.done = false;
-
-	if (s_async.cached) {
-		*out = s_async.result;
-		s_async.cached = false;
-		return out->valid ? THUMB_READY : THUMB_FAILED;
-	}
-
-	if (!s_async.ok || !s_async.rgba) {
-		s_async.ok = false;
-		thumbnailDeleteCache(s_async.hash);
-		return THUMB_FAILED;
-	}
+	if (!decoded)
+		return false;
 
 	if (s_cacheCount >= (int)(sizeof(s_cache) / sizeof(s_cache[0]))) {
 		imageFreeTexture(&s_cache[0].tex);
@@ -326,33 +278,22 @@ ThumbnailStatus thumbnailPollReady(Thumbnail* out)
 
 	ThumbnailCacheEntry* entry = &s_cache[s_cacheCount];
 	memset(entry, 0, sizeof(*entry));
-	entry->hash = s_async.hash;
-	bool ok = thumbnailBuildTexture(s_async.rgba, s_async.srcW, s_async.srcH, entry);
-	free(s_async.rgba);
-	s_async.rgba = NULL;
-	s_async.ok = false;
-
+	entry->hash = hash;
+	bool ok = thumbnailBuildTexture(rgba, srcW, srcH, entry);
+	free(rgba);
 	if (!ok) {
 		imageFreeTexture(&entry->tex);
-		thumbnailDeleteCache(s_async.hash);
-		return THUMB_FAILED;
+		thumbnailDeleteCache(hash);
+		return false;
 	}
 
 	entry->loaded = true;
 	s_cacheCount++;
-
-	out->image = entry->image;
-	out->width = (int)entry->subtex.width;
-	out->height = (int)entry->subtex.height;
-	out->valid = true;
-
 	debugSetThumbInfo(0, (int)entry->subtex.width, (int)entry->subtex.height,
 		(int)entry->tex.width, (int)entry->tex.height,
 		entry->subtex.left, entry->subtex.top,
 		entry->subtex.right, entry->subtex.bottom, "READY");
-	debugLog("thumb texture %dx%d sub %.3f,%.3f,%.3f,%.3f",
-		(int)entry->tex.width, (int)entry->tex.height,
-		entry->subtex.left, entry->subtex.top,
-		entry->subtex.right, entry->subtex.bottom);
-	return THUMB_READY;
+	debugLog("thumb decoded %dx%d texture %dx%d",
+		srcW, srcH, (int)entry->tex.width, (int)entry->tex.height);
+	return thumbnailUseEntry(entry, out);
 }

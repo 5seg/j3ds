@@ -268,11 +268,15 @@ static void browserPlaySong(const BrowserItem* song)
 {
     int index = (int)(song - s_state.items);
     playerSetQueue(s_state.items, s_state.count, index);
-    screenChange(SCREEN_PLAYER);
 
-    Result res = playerPlaySongAt(index);
+    /* playerPlaySongAt stops any active stream and pre-loads the album art
+       before opening the new stream. Set up the track before switching to
+       the player screen so the first rendered frame already shows it. */
+    Result res = playerPlaySongAt(playerQueueIndex());
     if (R_FAILED(res))
         browserSetStatus("Play failed: %08lX", (unsigned long)res);
+
+    screenChange(SCREEN_PLAYER);
 }
 
 static void browserDownloadOnly(const BrowserItem* song)

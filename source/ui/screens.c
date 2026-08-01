@@ -11,6 +11,7 @@
 #include "storage/config.h"
 #include "net/http.h"
 #include "net/jellyfin.h"
+#include "sys/updater.h"
 #include "app.h"
 
 static AppState s_stack[8];
@@ -22,6 +23,7 @@ typedef enum {
 	SET_PASSWORD,
 	SET_API_KEY,
 	SET_DISABLE_SSL,
+	SET_UPDATE,
 	SET_COUNT
 } SettingItem;
 
@@ -30,8 +32,8 @@ static char s_status[128] = "";
 
 #define HEADER_H   30
 #define HINT_H     34
-#define ROW_H      26
-#define ROW_GAP    4
+#define ROW_H      22
+#define ROW_GAP    3
 
 void screenInit(void)
 {
@@ -130,6 +132,9 @@ static void settingsEdit(void)
 		g_app.config.disableSslVerify = !g_app.config.disableSslVerify;
 		s_status[0] = '\0';
 		break;
+	case SET_UPDATE:
+		updaterCheck();
+		break;
 	default:
 		break;
 	}
@@ -139,6 +144,11 @@ void screenUpdate(void)
 {
 	switch (g_app.current) {
 	case SCREEN_SETTINGS:
+		if (updaterActive()) {
+			updaterUpdate();
+			break;
+		}
+
 		if (g_app.kDown & KEY_UP) {
 			s_settingSel--;
 			if (s_settingSel < 0)
@@ -243,10 +253,15 @@ static void screenRenderHome(void)
 
 static void screenRenderSettings(void)
 {
+	if (updaterActive()) {
+		updaterRenderBottom();
+		return;
+	}
+
 	screenRenderHeader("SETUP & LOGIN", GUI_COL_ACCENT);
 
 	const char* labels[SET_COUNT] = {
-		"Server URL", "Username", "Password", "API key", "SSL verify"
+		"Server URL", "Username", "Password", "API key", "SSL verify", "Update"
 	};
 
 	const char* values[SET_COUNT] = {
@@ -254,7 +269,8 @@ static void screenRenderSettings(void)
 		g_app.config.username,
 		g_app.config.password[0] ? "********" : "(not set)",
 		g_app.config.apiKey[0] ? "******** (legacy)" : "(empty)",
-		g_app.config.disableSslVerify ? "disabled" : "enabled"
+		g_app.config.disableSslVerify ? "disabled" : "enabled",
+		"v" APP_VERSION
 	};
 
 	float rowY = HEADER_H + 6;

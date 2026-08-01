@@ -12,6 +12,7 @@
 #include "audio/audio_player.h"
 #include "storage/config.h"
 #include "net/http.h"
+#include "sys/updater.h"
 #include "ui/thumbnail.h"
 #include "utils/debug.h"
 
@@ -31,6 +32,7 @@ void appInit(void)
 
 	httpGlobalInit();
 	audioInit();
+	updaterInit();
 
 	browserInit();
 	playerInit();
@@ -103,6 +105,7 @@ void appExit(void)
 {
 	configSave(&g_app.config);
 	thumbnailReleaseCache();
+	updaterExit();
 	httpGlobalExit();
 	audioExit();
 	debugExit();

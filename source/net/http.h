@@ -28,7 +28,13 @@ Result httpPostWithHeaders(const char* url, const char* body, const HttpHeader* 
 /* HTTP_ERR_STATUS is returned when the server replies with a non-200 status.
    Call httpLastStatus() to read the actual status code. */
 #define HTTP_ERR_STATUS ((Result)-2)
+#define HTTP_ERR_CANCELLED ((Result)-4)
 int httpLastStatus(void);
+
+/* Cooperative cancel for downloads. A download in progress aborts at the
+   next chunk boundary and returns HTTP_ERR_CANCELLED. */
+void httpSetCancel(bool cancel);
+bool httpCancelRequested(void);
 
 typedef void (*HttpDownloadProgress)(size_t downloaded, size_t total);
 

@@ -19,19 +19,9 @@
 #define PLAYER_THUMB_Y      24
 #define PLAYER_THUMB_SIZE   240
 
-/* Retry timing for album art loads. A transient network hiccup should not
-   permanently hide the art. */
-#define THUMB_RETRY_DELAY_FRAMES 45 /* ~0.75s at 60fps */
-#define THUMB_MAX_RETRIES        3
-
 static CurrentTrack s_track;
-static char s_thumbUrl[512] = "";
 static Thumbnail s_thumb;
 static bool s_thumbReady = false;
-static bool s_thumbLoading = false;
-static int s_thumbRetryDelay = 0;
-static int s_thumbRetries = 0;
-static bool s_thumbGiveUp = false;
 
 static BrowserItem s_queue[BROWSER_MAX_ITEMS];
 static int s_queueCount = 0;
@@ -50,12 +40,7 @@ void playerInit(void)
 {
     memset(&s_track, 0, sizeof(s_track));
     memset(&s_thumb, 0, sizeof(s_thumb));
-    s_thumbUrl[0] = '\0';
     s_thumbReady = false;
-    s_thumbLoading = false;
-    s_thumbRetryDelay = 0;
-    s_thumbRetries = 0;
-    s_thumbGiveUp = false;
     strncpy(s_track.title, "Test Track", sizeof(s_track.title) - 1);
     strncpy(s_track.artist, "Test Artist", sizeof(s_track.artist) - 1);
     strncpy(s_track.album, "Test Album", sizeof(s_track.album) - 1);
@@ -84,11 +69,6 @@ void playerSetTrack(const char* title, const char* artist, const char* album,
     }
 
     s_thumbReady = false;
-    s_thumbLoading = false;
-    s_thumbRetryDelay = 0;
-    s_thumbRetries = 0;
-    s_thumbGiveUp = false;
-    s_thumbUrl[0] = '\0';
 }
 
 void playerSetQueue(const BrowserItem* items, int count, int index)
@@ -116,6 +96,20 @@ void playerSetQueue(const BrowserItem* items, int count, int index)
     }
 }
 
+int playerQueueIndex(void)
+{
+    return s_queueIndex;
+}
+
+/* Fetch and upload art before opening the long-lived audio HTTP connection. */
+static void playerLoadThumb(void)
+{
+    if (s_track.thumbnailUrl[0] == '\0')
+        return;
+
+    s_thumbReady = thumbnailLoad(s_track.thumbnailUrl, &s_thumb);
+}
+
 Result playerPlaySongAt(int index)
 {
     if (index < 0 || index >= s_queueCount)
@@ -132,6 +126,12 @@ Result playerPlaySongAt(int index)
     s_queueIndex = index;
     playerSetTrack(song->name, song->artist, song->album, song->id,
         song->albumId[0] ? song->albumId : song->id);
+
+    /* Stop any active stream first so the httpc service is idle, then fetch
+       and upload the art, then reopen the stream. Never let the two overlap. */
+    audioStop();
+    playerLoadThumb();
+
     return audioPlayStream(url);
 }
 
@@ -186,59 +186,6 @@ void playerRenderTop(void)
     if (s_track.thumbnailUrl[0] == '\0')
         return;
 
-    ThumbnailStatus st = thumbnailPollReady(&s_thumb);
-    if (st == THUMB_READY) {
-        s_thumbLoading = false;
-        s_thumbRetries = 0;
-        s_thumbRetryDelay = 0;
-        if (strcmp(s_thumbUrl, s_track.thumbnailUrl) == 0)
-            s_thumbReady = s_thumb.valid;
-        else
-            s_thumbReady = false; /* stale result from a previous track */
-    } else if (st == THUMB_FAILED) {
-        /* The load failed; clear the requested URL so the block below can
-           re-kick it after a short delay (the module dropped the corrupt
-           disk cache entry so this re-downloads). */
-        s_thumbLoading = false;
-        s_thumbReady = false;
-        s_thumbUrl[0] = '\0';
-        debugLog("thumb poll failed, retry=%d/3", s_thumbRetries + 1);
-        if (++s_thumbRetries >= THUMB_MAX_RETRIES) {
-            s_thumbGiveUp = true;
-            s_thumbRetryDelay = 0;
-            debugSetThumbInfo(0, 0, 0, 0, 0, 0, 0, 0, 0, "GIVE UP");
-        } else {
-            s_thumbRetryDelay = THUMB_RETRY_DELAY_FRAMES;
-            debugSetThumbInfo(0, 0, 0, 0, 0, 0, 0, 0, 0, "RETRY");
-        }
-    }
-
-    if (s_thumbReady)
-        goto draw;
-
-    if (s_thumbGiveUp)
-        return;
-
-    if (s_thumbRetryDelay > 0) {
-        s_thumbRetryDelay--;
-        return;
-    }
-
-    /* Start (or restart) the load for the current URL. s_thumbUrl is only
-       recorded on a successful kick so a busy single-slot loader doesn't
-       cause us to skip the request forever. */
-    if (!s_thumbLoading && strcmp(s_thumbUrl, s_track.thumbnailUrl) != 0) {
-        strncpy(s_thumbUrl, s_track.thumbnailUrl, sizeof(s_thumbUrl) - 1);
-        s_thumbUrl[sizeof(s_thumbUrl) - 1] = '\0';
-        if (thumbnailLoadAsync(s_thumbUrl)) {
-            s_thumbLoading = true;
-            debugSetThumbInfo(0, 0, 0, 0, 0, 0, 0, 0, 0, "LOADING");
-        } else {
-            s_thumbUrl[0] = '\0'; /* busy; retry next frame */
-        }
-    }
-
-draw:
     if (!s_thumbReady || !s_thumb.valid)
         return;
 
