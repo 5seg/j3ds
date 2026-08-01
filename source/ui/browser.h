@@ -6,16 +6,17 @@
 
 typedef enum {
     ITEM_TYPE_UNKNOWN,
-    ITEM_TYPE_FOLDER,
-    ITEM_TYPE_ARTIST,
-    ITEM_TYPE_ALBUM,
-    ITEM_TYPE_SONG,
-    ITEM_TYPE_VIEW
+    ITEM_TYPE_PLAYLISTS,    /* root entry "Playlists" / playlist list */
+    ITEM_TYPE_ALL,          /* root entry "All Musics" / full song list */
+    ITEM_TYPE_PLAYLIST,     /* a single playlist */
+    ITEM_TYPE_SONG          /* an audio track */
 } ItemType;
 
 typedef struct {
     char id[64];
     char name[BROWSER_MAX_NAME];
+    char artist[BROWSER_MAX_NAME];
+    char album[BROWSER_MAX_NAME];
     ItemType type;
     char parentId[64];
 } BrowserItem;

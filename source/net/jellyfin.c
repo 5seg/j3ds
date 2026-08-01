@@ -125,7 +125,7 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 	char auth[JF_AUTH_HEADER_MAX];
 	snprintf(auth, sizeof(auth),
 		"MediaBrowser Client=\"Jellyfin3DS\", Device=\"Nintendo 3DS\", "
-		"DeviceId=\"j3ds-3ds\", Version=\"0.1.9\"");
+		"DeviceId=\"j3ds-3ds\", Version=\"0.1.10\"");
 
 	HttpHeader headers[] = {
 		{ "Content-Type", "application/json" },
@@ -167,35 +167,9 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 	return ret;
 }
 
-Result jellyfinGetViews(const char* serverUrl, const char* apiKey, char** json, size_t* len)
-{
-	if (!json || !len)
-		return -1;
-
-	char base[JF_URL_MAX];
-	normalizeServerUrl(serverUrl, base, sizeof(base));
-	if (base[0] == '\0')
-		return -1;
-
-	char url[JF_FULL_URL_MAX];
-	const char* uid = g_app.userId[0] ? g_app.userId : "me";
-	int n = snprintf(url, sizeof(url), "%s/Users/%s/Views", base, uid);
-	if (n < 0 || (size_t)n >= sizeof(url) || strlen(url) >= JF_HTTP_MAX_URL)
-		return -1;
-
-	char auth[JF_AUTH_HEADER_MAX];
-	snprintf(auth, sizeof(auth), "MediaBrowser Token=\"%s\"", apiKey ? apiKey : "");
-
-	HttpHeader headers[] = {
-		{ "Authorization", auth },
-		{ "X-Emby-Authorization", auth }
-	};
-
-	return httpGetWithHeaders(url, headers, 2, json, len);
-}
-
 Result jellyfinGetItems(const char* serverUrl, const char* apiKey, const char* parentId,
-	const char* artistId, const char* includeTypes, char** json, size_t* len)
+	const char* includeTypes, const char* sortBy, const char* sortOrder,
+	char** json, size_t* len)
 {
 	if (!json || !len)
 		return -1;
@@ -206,9 +180,8 @@ Result jellyfinGetItems(const char* serverUrl, const char* apiKey, const char* p
 		return -1;
 
 	char url[JF_FULL_URL_MAX];
-	const char* recursive = (artistId && artistId[0]) ? "true" : "false";
 	const char* uid = g_app.userId[0] ? g_app.userId : "me";
-	int n = snprintf(url, sizeof(url), "%s/Items?UserId=%s&Recursive=%s", base, uid, recursive);
+	int n = snprintf(url, sizeof(url), "%s/Items?UserId=%s&Recursive=true", base, uid);
 	if (n < 0 || (size_t)n >= sizeof(url))
 		return -1;
 
@@ -221,15 +194,22 @@ Result jellyfinGetItems(const char* serverUrl, const char* apiKey, const char* p
 		pos += (size_t)n;
 	}
 
-	if (artistId && artistId[0]) {
-		n = snprintf(url + pos, sizeof(url) - pos, "&AlbumArtistIds=%s", artistId);
+	if (includeTypes && includeTypes[0]) {
+		n = snprintf(url + pos, sizeof(url) - pos, "&IncludeItemTypes=%s", includeTypes);
 		if (n < 0 || (size_t)n >= sizeof(url) - pos)
 			return -1;
 		pos += (size_t)n;
 	}
 
-	if (includeTypes && includeTypes[0]) {
-		n = snprintf(url + pos, sizeof(url) - pos, "&IncludeItemTypes=%s", includeTypes);
+	if (sortBy && sortBy[0]) {
+		n = snprintf(url + pos, sizeof(url) - pos, "&SortBy=%s", sortBy);
+		if (n < 0 || (size_t)n >= sizeof(url) - pos)
+			return -1;
+		pos += (size_t)n;
+	}
+
+	if (sortOrder && sortOrder[0]) {
+		n = snprintf(url + pos, sizeof(url) - pos, "&SortOrder=%s", sortOrder);
 		if (n < 0 || (size_t)n >= sizeof(url) - pos)
 			return -1;
 		pos += (size_t)n;

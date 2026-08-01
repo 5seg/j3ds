@@ -41,11 +41,20 @@ typedef struct {
     int scroll;
 } BrowserLevel;
 
+typedef enum {
+    SORT_TITLE,
+    SORT_ARTIST,
+    SORT_ALBUM,
+    SORT_NEWEST,
+    SORT_COUNT
+} SortMode;
+
 static BrowserState s_state;
 static BrowserLevel s_stack[BROWSER_STACK_MAX];
 static int s_stackTop = 0;
 static char s_status[BROWSER_STATUS_MAX] = "";
 static bool s_downloading = false;
+static SortMode s_sortMode = SORT_TITLE;
 
 static Result browserEnsureAuthenticated(void)
 {
@@ -111,25 +120,41 @@ static ItemType browserTypeFromString(const char* typeStr)
 {
     if (!typeStr)
         return ITEM_TYPE_UNKNOWN;
-    if (strcmp(typeStr, "MusicArtist") == 0)
-        return ITEM_TYPE_ARTIST;
-    if (strcmp(typeStr, "MusicAlbum") == 0)
-        return ITEM_TYPE_ALBUM;
+    if (strcmp(typeStr, "Playlist") == 0 || strcmp(typeStr, "MusicPlaylist") == 0)
+        return ITEM_TYPE_PLAYLIST;
     if (strcmp(typeStr, "Audio") == 0)
         return ITEM_TYPE_SONG;
-    if (strcmp(typeStr, "Folder") == 0 || strcmp(typeStr, "CollectionFolder") == 0)
-        return ITEM_TYPE_FOLDER;
     return ITEM_TYPE_UNKNOWN;
 }
 
 static const char* browserTypeName(ItemType type)
 {
     switch (type) {
-    case ITEM_TYPE_VIEW:   return "views";
-    case ITEM_TYPE_ARTIST: return "artists";
-    case ITEM_TYPE_ALBUM:  return "albums";
-    case ITEM_TYPE_SONG:   return "songs";
-    default:               return "items";
+    case ITEM_TYPE_PLAYLISTS: return "playlists";
+    case ITEM_TYPE_ALL:       return "music";
+    case ITEM_TYPE_PLAYLIST:  return "playlists";
+    case ITEM_TYPE_SONG:      return "songs";
+    default:                  return "items";
+    }
+}
+
+static const char* browserSortName(SortMode mode)
+{
+    switch (mode) {
+    case SORT_ARTIST: return "Artist";
+    case SORT_ALBUM:  return "Album";
+    case SORT_NEWEST: return "Newest";
+    default:          return "Title";
+    }
+}
+
+static void browserSortParams(const char** sortBy, const char** sortOrder)
+{
+    switch (s_sortMode) {
+    case SORT_ARTIST: *sortBy = "AlbumArtist,SortName"; *sortOrder = "Ascending"; break;
+    case SORT_ALBUM:  *sortBy = "Album,SortName";       *sortOrder = "Ascending"; break;
+    case SORT_NEWEST: *sortBy = "DateCreated";          *sortOrder = "Descending"; break;
+    default:          *sortBy = "SortName";             *sortOrder = "Ascending"; break;
     }
 }
 
@@ -231,14 +256,7 @@ static void browserPlaySong(const BrowserItem* song)
         }
     }
 
-    const char* artist = "";
-    const char* album = "";
-    if (s_stackTop >= 2)
-        artist = s_stack[s_stackTop - 2].name;
-    if (s_stackTop >= 1)
-        album = s_stack[s_stackTop - 1].name;
-
-    playerSetTrack(song->name, artist, album, song->id);
+    playerSetTrack(song->name, song->artist, song->album, song->id);
     screenChange(SCREEN_PLAYER);
 
     Result res = audioPlay(path);
@@ -265,63 +283,56 @@ static void browserDownloadOnly(const BrowserItem* song)
 
 static void browserLoadRootItems(void)
 {
-    s_state.currentType = ITEM_TYPE_VIEW;
+    s_state.currentType = ITEM_TYPE_UNKNOWN;
     s_state.currentId[0] = '\0';
+    s_sortMode = SORT_TITLE;
     browserResetItems();
 
-    char* json = NULL;
-    size_t len = 0;
-    Result res = jellyfinGetViews(g_app.config.serverUrl, appAuthToken(), &json, &len);
-    if (R_FAILED(res)) {
-        if (res == HTTP_ERR_STATUS)
-            browserSetStatus("Views failed: HTTP %d", httpLastStatus());
-        else
-            browserSetStatus("Views failed: %08lX", (unsigned long)res);
+    if (g_app.config.serverUrl[0] == '\0' || appAuthToken()[0] == '\0') {
+        browserSetStatus("Not authenticated");
         return;
     }
 
-    json_error_t err;
-    json_t* root = json_loads(json, 0, &err);
-    free(json);
-    if (!root) {
-        browserSetStatus("Views parse error");
-        return;
+    BrowserItem* p = &s_state.items[s_state.count++];
+    p->type = ITEM_TYPE_PLAYLISTS;
+    snprintf(p->name, sizeof(p->name), "Playlists");
+    snprintf(p->id, sizeof(p->id), "playlists");
+
+    BrowserItem* m = &s_state.items[s_state.count++];
+    m->type = ITEM_TYPE_ALL;
+    snprintf(m->name, sizeof(m->name), "All Musics");
+    snprintf(m->id, sizeof(m->id), "allmusic");
+
+    browserSetStatus("Loaded %d lists", s_state.count);
+}
+
+static void browserItemArtist(json_t* it, char* out, size_t outLen)
+{
+    out[0] = '\0';
+    json_t* arr = json_object_get(it, "Artists");
+    if (json_is_array(arr) && json_array_size(arr) > 0) {
+        const char* n = jsonGetString(json_array_get(arr, 0), "Name");
+        if (n) {
+            strncpy(out, n, outLen - 1);
+            out[outLen - 1] = '\0';
+            return;
+        }
     }
-
-    json_t* items = json_object_get(root, "Items");
-    if (!json_is_array(items)) {
-        json_decref(root);
-        browserSetStatus("No Items in views");
-        return;
+    const char* a = jsonGetString(it, "AlbumArtist");
+    if (a) {
+        strncpy(out, a, outLen - 1);
+        out[outLen - 1] = '\0';
     }
+}
 
-    size_t i, n = json_array_size(items);
-    if (n > BROWSER_MAX_ITEMS)
-        n = BROWSER_MAX_ITEMS;
-
-    for (i = 0; i < n; ++i) {
-        json_t* it = json_array_get(items, i);
-        if (!json_is_object(it))
-            continue;
-        const char* id = jsonGetString(it, "Id");
-        const char* name = jsonGetString(it, "Name");
-        if (!id || !name)
-            continue;
-
-        BrowserItem* b = &s_state.items[s_state.count++];
-        strncpy(b->id, id, sizeof(b->id) - 1);
-        b->id[sizeof(b->id) - 1] = '\0';
-        strncpy(b->name, name, sizeof(b->name) - 1);
-        b->name[sizeof(b->name) - 1] = '\0';
-        b->type = ITEM_TYPE_VIEW;
-        b->parentId[0] = '\0';
+static void browserItemAlbum(json_t* it, char* out, size_t outLen)
+{
+    out[0] = '\0';
+    const char* n = jsonGetString(json_object_get(it, "Album"), "Name");
+    if (n) {
+        strncpy(out, n, outLen - 1);
+        out[outLen - 1] = '\0';
     }
-
-    json_decref(root);
-    if (s_state.count == 0)
-        browserSetStatus("No libraries found");
-    else
-        browserSetStatus("Loaded %d views", s_state.count);
 }
 
 void browserInit(void)
@@ -370,30 +381,32 @@ void browserLoadItems(const char* parentId, ItemType type)
     }
 
     const char* includeTypes = NULL;
-    const char* artistId = NULL;
+    const char* sortBy = NULL;
+    const char* sortOrder = NULL;
     const char* queryParentId = parentId;
 
     switch (type) {
-    case ITEM_TYPE_ARTIST:
-        includeTypes = "MusicArtist";
+    case ITEM_TYPE_PLAYLISTS:
+        includeTypes = "Playlist";
+        sortBy = "SortName";
+        sortOrder = "Ascending";
         break;
-    case ITEM_TYPE_ALBUM:
-        includeTypes = "MusicAlbum";
-        artistId = parentId;
-        queryParentId = NULL;
+    case ITEM_TYPE_ALL:
+        includeTypes = "Audio";
+        browserSortParams(&sortBy, &sortOrder);
         break;
-    case ITEM_TYPE_SONG:
+    case ITEM_TYPE_PLAYLIST:
         includeTypes = "Audio";
         break;
     default:
-        includeTypes = "Audio,MusicAlbum,MusicArtist";
+        includeTypes = "Audio";
         break;
     }
 
     char* json = NULL;
     size_t len = 0;
     Result res = jellyfinGetItems(g_app.config.serverUrl, appAuthToken(),
-        queryParentId, artistId, includeTypes, &json, &len);
+        queryParentId, includeTypes, sortBy, sortOrder, &json, &len);
     if (R_FAILED(res)) {
         if (res == HTTP_ERR_STATUS)
             browserSetStatus("Load failed: HTTP %d", httpLastStatus());
@@ -437,6 +450,8 @@ void browserLoadItems(const char* parentId, ItemType type)
         strncpy(b->name, name, sizeof(b->name) - 1);
         b->name[sizeof(b->name) - 1] = '\0';
         b->type = browserTypeFromString(typeStr);
+        browserItemArtist(it, b->artist, sizeof(b->artist));
+        browserItemAlbum(it, b->album, sizeof(b->album));
         if (parentId) {
             strncpy(b->parentId, parentId, sizeof(b->parentId) - 1);
             b->parentId[sizeof(b->parentId) - 1] = '\0';
@@ -446,7 +461,11 @@ void browserLoadItems(const char* parentId, ItemType type)
     }
 
     json_decref(root);
-    browserSetStatus("Loaded %d %s", s_state.count, browserTypeName(type));
+    if (type == ITEM_TYPE_ALL)
+        browserSetStatus("Loaded %d songs (sort: %s)", s_state.count,
+            browserSortName(s_sortMode));
+    else
+        browserSetStatus("Loaded %d %s", s_state.count, browserTypeName(type));
 }
 
 void browserUpdate(void)
@@ -505,7 +524,7 @@ void browserUpdate(void)
             BrowserLevel* lvl = &s_stack[--s_stackTop];
             int sel = lvl->selected;
             int scroll = lvl->scroll;
-            if (lvl->type == ITEM_TYPE_VIEW)
+            if (lvl->type == ITEM_TYPE_UNKNOWN)
                 browserLoadRootItems();
             else
                 browserLoadItems(lvl->id[0] ? lvl->id : NULL, lvl->type);
@@ -522,23 +541,36 @@ void browserUpdate(void)
     if (g_app.kDown & KEY_A) {
         const BrowserItem* item = &s_state.items[s_state.selected];
         switch (item->type) {
-        case ITEM_TYPE_VIEW:
+        case ITEM_TYPE_PLAYLISTS:
             browserPushLevel();
-            browserLoadItems(item->id, ITEM_TYPE_ARTIST);
+            browserLoadItems(NULL, ITEM_TYPE_PLAYLISTS);
             break;
-        case ITEM_TYPE_ARTIST:
+        case ITEM_TYPE_ALL:
             browserPushLevel();
-            browserLoadItems(item->id, ITEM_TYPE_ALBUM);
+            browserLoadItems(NULL, ITEM_TYPE_ALL);
             break;
-        case ITEM_TYPE_ALBUM:
+        case ITEM_TYPE_PLAYLIST:
             browserPushLevel();
-            browserLoadItems(item->id, ITEM_TYPE_SONG);
+            browserLoadItems(item->id, ITEM_TYPE_PLAYLIST);
             break;
         case ITEM_TYPE_SONG:
             browserPlaySong(item);
             break;
         default:
             break;
+        }
+    }
+
+    if (g_app.kDown & KEY_Y) {
+        const BrowserItem* item = &s_state.items[s_state.selected];
+        if (s_state.currentType == ITEM_TYPE_ALL && item->type == ITEM_TYPE_SONG) {
+            s_sortMode = (SortMode)((s_sortMode + 1) % SORT_COUNT);
+            int sel = s_state.selected;
+            int scroll = s_state.scroll;
+            browserLoadItems(NULL, ITEM_TYPE_ALL);
+            s_state.selected = sel;
+            s_state.scroll = scroll;
+            browserUpdateScroll();
         }
     }
 
@@ -552,30 +584,29 @@ void browserUpdate(void)
 static const char* browserItemBadge(ItemType type)
 {
     switch (type) {
-    case ITEM_TYPE_VIEW:   return "V";
-    case ITEM_TYPE_ARTIST: return "A";
-    case ITEM_TYPE_ALBUM:  return "L";
-    case ITEM_TYPE_SONG:   return "S";
-    case ITEM_TYPE_FOLDER: return "F";
-    default:               return "?";
+    case ITEM_TYPE_PLAYLISTS: return "P";
+    case ITEM_TYPE_ALL:       return "M";
+    case ITEM_TYPE_PLAYLIST:  return "P";
+    case ITEM_TYPE_SONG:      return "S";
+    default:                  return "?";
     }
 }
 
 static u32 browserItemColor(ItemType type)
 {
     switch (type) {
-    case ITEM_TYPE_VIEW:   return GUI_COL_ACCENT;
-    case ITEM_TYPE_ARTIST: return GUI_COL_GOOD;
-    case ITEM_TYPE_ALBUM:  return GUI_COL_SELECT;
-    case ITEM_TYPE_SONG:   return GUI_COL_TEXT;
-    default:               return GUI_COL_DIM;
+    case ITEM_TYPE_PLAYLISTS: return GUI_COL_ACCENT;
+    case ITEM_TYPE_ALL:       return GUI_COL_SELECT;
+    case ITEM_TYPE_PLAYLIST:  return GUI_COL_ACCENT;
+    case ITEM_TYPE_SONG:      return GUI_COL_TEXT;
+    default:                  return GUI_COL_DIM;
     }
 }
 
 static void browserBuildBreadcrumb(char* out, size_t outLen)
 {
     out[0] = '\0';
-    strncat(out, "Libraries", outLen - strlen(out) - 1);
+    strncat(out, "Music", outLen - strlen(out) - 1);
     for (int i = 0; i < s_stackTop; ++i) {
         strncat(out, " / ", outLen - strlen(out) - 1);
         strncat(out, s_stack[i].name, outLen - strlen(out) - 1);
@@ -614,6 +645,10 @@ void browserRender(void)
             guiText(browserItemBadge(item->type), 12, y + 3, 0.45f,
                 browserItemColor(item->type));
             guiText(item->name, 28, y + 3, 0.45f, GUI_COL_TEXT);
+
+            if (item->type == ITEM_TYPE_SONG && item->artist[0])
+                guiTextRight(item->artist, GUI_BOT_W - 10, y + 3, 0.4f,
+                    GUI_COL_MUTED);
         }
     }
 
@@ -624,7 +659,11 @@ void browserRender(void)
     /* Hint bar. */
     guiRect(0, BROWSER_HINT_Y, GUI_BOT_W, 34, GUI_COL_HEADER);
     guiRect(0, BROWSER_HINT_Y, GUI_BOT_W, 1, GUI_COL_DIM);
-    guiText("B: Back  X: Cache", 8, BROWSER_HINT_Y + 8, 0.4f, GUI_COL_MUTED);
+    if (s_state.currentType == ITEM_TYPE_ALL)
+        guiText("B: Back  X: Cache  Y: Sort", 8, BROWSER_HINT_Y + 8, 0.4f,
+            GUI_COL_MUTED);
+    else
+        guiText("B: Back  X: Cache", 8, BROWSER_HINT_Y + 8, 0.4f, GUI_COL_MUTED);
     guiTextRight("A: Open/Play", GUI_BOT_W - 8, BROWSER_HINT_Y + 8, 0.4f,
         GUI_COL_MUTED);
 }
