@@ -105,16 +105,6 @@ bool imageLoadJpegRgba(const void* data, size_t size, int maxDim,
    stored in Morton (Z-order) interleaved order, not row-major. This matches
    what tex3ds produces and what the GPU expects when sampling a tiled
    texture. */
-static inline u32 imageMorton3(u32 x, u32 y)
-{
-	u32 z = 0;
-	for (int i = 0; i < 3; i++) {
-		z |= ((x >> i) & 1) << (2 * i);
-		z |= ((y >> i) & 1) << (2 * i + 1);
-	}
-	return z;
-}
-
 void imageSwizzleRgba8(u32* rgba, int width, int height)
 {
 	if (!rgba || width <= 0 || height <= 0)
@@ -126,17 +116,34 @@ void imageSwizzleRgba8(u32* rgba, int width, int height)
 
 	int tilesX = width / 8;
 	int tilesY = height / 8;
+	static const u8 table[][4] = {
+		{ 2, 8, 16, 4 }, { 3, 9, 17, 5 }, { 6, 10, 24, 20 },
+		{ 7, 11, 25, 21 }, { 14, 26, 28, 22 }, { 15, 27, 29, 23 },
+		{ 34, 40, 48, 36 }, { 35, 41, 49, 37 }, { 38, 42, 56, 52 },
+		{ 39, 43, 57, 53 }, { 46, 58, 60, 54 }, { 47, 59, 61, 55 }
+	};
 
 	for (int ty = 0; ty < tilesY; ty++) {
 		for (int tx = 0; tx < tilesX; tx++) {
+			u32 tile[64];
 			for (int yy = 0; yy < 8; yy++) {
 				for (int xx = 0; xx < 8; xx++) {
-					u32 px = rgba[(size_t)(ty * 8 + yy) * width + tx * 8 + xx];
-					int dstIndex = ((size_t)(ty * tilesX + tx) * 64) +
-						(int)imageMorton3((u32)xx, (u32)yy);
-					tmp[dstIndex] = px;
+					tile[yy * 8 + xx] =
+						rgba[(size_t)(ty * 8 + yy) * width + tx * 8 + xx];
 				}
 			}
+			for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); ++i) {
+				u32 v = tile[table[i][0]];
+				tile[table[i][0]] = tile[table[i][1]];
+				tile[table[i][1]] = tile[table[i][2]];
+				tile[table[i][2]] = tile[table[i][3]];
+				tile[table[i][3]] = v;
+			}
+			u32 v = tile[12]; tile[12] = tile[18]; tile[18] = v;
+			v = tile[13]; tile[13] = tile[19]; tile[19] = v;
+			v = tile[44]; tile[44] = tile[50]; tile[50] = v;
+			v = tile[45]; tile[45] = tile[51]; tile[51] = v;
+			memcpy(tmp + (size_t)(ty * tilesX + tx) * 64, tile, sizeof(tile));
 		}
 	}
 

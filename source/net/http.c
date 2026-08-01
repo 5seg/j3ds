@@ -8,6 +8,7 @@
 #include "app.h"
 #include "net/certs.h"
 #include "net/usertrust_rsa.h"
+#include "utils/debug.h"
 
 #define HTTP_MAX_URL        2048
 #define HTTP_CHUNK_SIZE     4096
@@ -110,6 +111,7 @@ static Result httpRequest(httpcContext* context, HTTPC_RequestMethod method, con
 
 	if (noVerify || g_app.config.disableSslVerify) {
 		ret = httpcSetSSLOpt(context, SSLCOPT_DisableVerify);
+		debugLog("http set SSL no-verify ret=0x%08X", (unsigned int)ret);
 		if (R_FAILED(ret))
 			goto cleanup;
 	}
@@ -118,14 +120,21 @@ static Result httpRequest(httpcContext* context, HTTPC_RequestMethod method, con
 	   and its SSL module cannot validate ECDSA-signed chains, so pin the
 	   Sectigo RSA root that GitHub presents to RSA-capable clients. */
 	if (noVerify) {
+		ret = httpcAddDefaultCert(context, SSLC_DefaultRootCert_USERTrust);
+		debugLog("http add default USERTrust ret=0x%08X", (unsigned int)ret);
+		if (R_FAILED(ret))
+			goto cleanup;
 		ret = httpcAddTrustedRootCA(context, g_githubRootR46, sizeof(g_githubRootR46));
+		debugLog("http add R46 ret=0x%08X", (unsigned int)ret);
 		if (R_FAILED(ret))
 			goto cleanup;
 		ret = httpcAddTrustedRootCA(context, g_githubIntR36, sizeof(g_githubIntR36));
+		debugLog("http add R36 ret=0x%08X", (unsigned int)ret);
 		if (R_FAILED(ret))
 			goto cleanup;
 		ret = httpcAddTrustedRootCA(context, g_userTrustRsaRoot,
 			sizeof(g_userTrustRsaRoot));
+		debugLog("http add USERTrust DER ret=0x%08X", (unsigned int)ret);
 		if (R_FAILED(ret))
 			goto cleanup;
 	}
@@ -168,6 +177,7 @@ static Result httpRequest(httpcContext* context, HTTPC_RequestMethod method, con
 	}
 
 	ret = httpcBeginRequest(context);
+	debugLog("http begin ret=0x%08X", (unsigned int)ret);
 	if (postRaw) {
 		free(postRaw);
 		postRaw = NULL;
