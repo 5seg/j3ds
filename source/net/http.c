@@ -12,8 +12,14 @@
 #define HTTP_MAX_REDIRECTS  8
 
 #define HTTP_ERR_GENERIC    ((Result)-1)
-#define HTTP_ERR_STATUS       ((Result)-2)
 #define HTTP_ERR_TOO_MANY_REDIRECTS ((Result)-3)
+
+static int s_lastStatus = 0;
+
+int httpLastStatus(void)
+{
+	return s_lastStatus;
+}
 
 static Result httpReadResponse(httpcContext* context, char** out, size_t* outLen)
 {
@@ -176,6 +182,7 @@ static Result httpDoRequest(const char* url, HTTPC_RequestMethod method, const c
 		if (status != 200) {
 			httpcCloseContext(&context);
 			free(redirectUrl);
+			s_lastStatus = (int)status;
 			return HTTP_ERR_STATUS;
 		}
 
@@ -279,6 +286,7 @@ Result httpDownloadFileWithProgress(const char* url, const char* path,
 			httpcCloseContext(&context);
 			free(redirectUrl);
 			fclose(f);
+			s_lastStatus = (int)status;
 			return HTTP_ERR_STATUS;
 		}
 

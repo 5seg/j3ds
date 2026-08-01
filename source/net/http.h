@@ -15,6 +15,11 @@ Result httpPost(const char* url, const char* body, char** out, size_t* outLen);
 Result httpPostWithHeader(const char* url, const char* body, const char* headerName,
 	const char* headerValue, char** out, size_t* outLen);
 
+/* HTTP_ERR_STATUS is returned when the server replies with a non-200 status.
+   Call httpLastStatus() to read the actual status code. */
+#define HTTP_ERR_STATUS ((Result)-2)
+int httpLastStatus(void);
+
 typedef void (*HttpDownloadProgress)(size_t downloaded, size_t total);
 
 Result httpDownloadFileWithProgress(const char* url, const char* path,

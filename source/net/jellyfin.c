@@ -114,7 +114,15 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 
 	char* resp = NULL;
 	size_t len = 0;
-	Result ret = httpPost(url, body, &resp, &len);
+
+	/* Jellyfin rejects AuthenticateByName without a MediaBrowser
+	   authorization header that identifies the client/device. */
+	char auth[JF_AUTH_HEADER_MAX];
+	snprintf(auth, sizeof(auth),
+		"MediaBrowser Client=\"Jellyfin3DS\", Device=\"Nintendo 3DS\", "
+		"DeviceId=\"j3ds-3ds\", Version=\"0.1.5\"");
+
+	Result ret = httpPostWithHeader(url, body, "Authorization", auth, &resp, &len);
 	free(body);
 
 	if (R_FAILED(ret))

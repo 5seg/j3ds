@@ -338,7 +338,10 @@ void browserLoadRoot(void)
 
     Result authRes = browserEnsureAuthenticated();
     if (R_FAILED(authRes)) {
-        browserSetStatus("Login failed: %08lX", (unsigned long)authRes);
+        if (authRes == HTTP_ERR_STATUS)
+            browserSetStatus("Login failed: HTTP %d", httpLastStatus());
+        else
+            browserSetStatus("Login failed: %08lX", (unsigned long)authRes);
         return;
     }
 
