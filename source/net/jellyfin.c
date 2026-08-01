@@ -128,11 +128,12 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 		"DeviceId=\"j3ds-3ds\", Version=\"0.1.7\"");
 
 	HttpHeader headers[] = {
+		{ "Content-Type", "application/json" },
 		{ "Authorization", auth },
 		{ "X-Emby-Authorization", auth }
 	};
 
-	Result ret = httpPostWithHeaders(url, body, headers, 2, &resp, &len);
+	Result ret = httpPostWithHeaders(url, body, headers, 3, &resp, &len);
 	free(body);
 
 	if (R_FAILED(ret))

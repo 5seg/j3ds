@@ -11,6 +11,7 @@
 #include "storage/config.h"
 #include "net/http.h"
 #include "net/jellyfin.h"
+#include "app.h"
 
 static AppState s_stack[8];
 static int s_top = 0;
@@ -78,6 +79,8 @@ static void settingsTestConnection(void)
 		snprintf(s_status, sizeof(s_status), "%s / %s",
 			info.serverName[0] ? info.serverName : "Jellyfin",
 			info.version[0] ? info.version : "?");
+	} else if (res == HTTP_ERR_STATUS) {
+		snprintf(s_status, sizeof(s_status), "Connection failed: HTTP %d", httpLastStatus());
 	} else {
 		snprintf(s_status, sizeof(s_status), "Connection failed: %08lX", (unsigned long)res);
 	}
@@ -312,4 +315,5 @@ void screenRenderTop(void)
 	guiTextCentered("Jellyfin 3DS", GUI_TOP_W / 2.0f, 168, 0.9f, GUI_COL_TEXT);
 	guiTextCentered("Your music, on your 3DS", GUI_TOP_W / 2.0f, 198, 0.5f,
 		GUI_COL_MUTED);
+	guiTextRight("v" APP_VERSION, GUI_TOP_W - 8, GUI_TOP_H - 14, 0.4f, GUI_COL_DIM);
 }
