@@ -23,6 +23,7 @@ typedef struct {
 	touchPosition touch;
 	Config config;
 	char authToken[CONFIG_MAX_KEY];
+	char userId[64];
 } AppContext;
 
 extern AppContext g_app;

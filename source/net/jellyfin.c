@@ -7,6 +7,7 @@
 
 #include "net/http.h"
 #include "utils/json.h"
+#include "app.h"
 
 #define JF_URL_MAX 1024
 #define JF_FULL_URL_MAX 2048
@@ -82,11 +83,13 @@ Result jellyfinServerInfo(const char* serverUrl, JellyfinServerInfo* info)
 }
 
 Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const char* password,
-	char* apiKey, size_t apiKeyLen)
+	char* apiKey, size_t apiKeyLen, char* userId, size_t userIdLen)
 {
 	if (!apiKey || apiKeyLen == 0)
 		return -1;
 	apiKey[0] = '\0';
+	if (userId && userIdLen > 0)
+		userId[0] = '\0';
 
 	if (!username || !password)
 		return -1;
@@ -116,13 +119,20 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 	size_t len = 0;
 
 	/* Jellyfin rejects AuthenticateByName without a MediaBrowser
-	   authorization header that identifies the client/device. */
+	   authorization header that identifies the client/device. Send it both
+	   as Authorization (current) and X-Emby-Authorization (legacy) because
+	   some reverse proxies strip the Authorization header. */
 	char auth[JF_AUTH_HEADER_MAX];
 	snprintf(auth, sizeof(auth),
 		"MediaBrowser Client=\"Jellyfin3DS\", Device=\"Nintendo 3DS\", "
-		"DeviceId=\"j3ds-3ds\", Version=\"0.1.5\"");
+		"DeviceId=\"j3ds-3ds\", Version=\"0.1.7\"");
 
-	Result ret = httpPostWithHeader(url, body, "Authorization", auth, &resp, &len);
+	HttpHeader headers[] = {
+		{ "Authorization", auth },
+		{ "X-Emby-Authorization", auth }
+	};
+
+	Result ret = httpPostWithHeaders(url, body, headers, 2, &resp, &len);
 	free(body);
 
 	if (R_FAILED(ret))
@@ -141,6 +151,15 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 		apiKey[apiKeyLen - 1] = '\0';
 	} else {
 		ret = -1;
+	}
+
+	json_t* userObj = json_object_get(root, "User");
+	if (userId && userIdLen > 0) {
+		const char* uid = jsonGetString(userObj, "Id");
+		if (uid) {
+			strncpy(userId, uid, userIdLen - 1);
+			userId[userIdLen - 1] = '\0';
+		}
 	}
 
 	json_decref(root);
@@ -165,7 +184,12 @@ Result jellyfinGetViews(const char* serverUrl, const char* apiKey, char** json, 
 	char auth[JF_AUTH_HEADER_MAX];
 	snprintf(auth, sizeof(auth), "MediaBrowser Token=\"%s\"", apiKey ? apiKey : "");
 
-	return httpGetWithHeader(url, "Authorization", auth, json, len);
+	HttpHeader headers[] = {
+		{ "Authorization", auth },
+		{ "X-Emby-Authorization", auth }
+	};
+
+	return httpGetWithHeaders(url, headers, 2, json, len);
 }
 
 Result jellyfinGetItems(const char* serverUrl, const char* apiKey, const char* parentId,
@@ -181,7 +205,8 @@ Result jellyfinGetItems(const char* serverUrl, const char* apiKey, const char* p
 
 	char url[JF_FULL_URL_MAX];
 	const char* recursive = (artistId && artistId[0]) ? "true" : "false";
-	int n = snprintf(url, sizeof(url), "%s/Items?UserId=me&Recursive=%s", base, recursive);
+	const char* uid = g_app.userId[0] ? g_app.userId : "me";
+	int n = snprintf(url, sizeof(url), "%s/Items?UserId=%s&Recursive=%s", base, uid, recursive);
 	if (n < 0 || (size_t)n >= sizeof(url))
 		return -1;
 
@@ -219,7 +244,12 @@ Result jellyfinGetItems(const char* serverUrl, const char* apiKey, const char* p
 	char auth[JF_AUTH_HEADER_MAX];
 	snprintf(auth, sizeof(auth), "MediaBrowser Token=\"%s\"", apiKey ? apiKey : "");
 
-	return httpGetWithHeader(url, "Authorization", auth, json, len);
+	HttpHeader headers[] = {
+		{ "Authorization", auth },
+		{ "X-Emby-Authorization", auth }
+	};
+
+	return httpGetWithHeaders(url, headers, 2, json, len);
 }
 
 void jellyfinGetThumbnailUrl(const char* serverUrl, const char* apiKey, const char* itemId,

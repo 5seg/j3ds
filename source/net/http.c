@@ -65,7 +65,7 @@ static Result httpReadResponse(httpcContext* context, char** out, size_t* outLen
 }
 
 static Result httpRequest(httpcContext* context, HTTPC_RequestMethod method, const char* url,
-	const char* body, const char* headerName, const char* headerValue, u32* statusOut)
+	const char* body, const HttpHeader* headers, int headerCount, u32* statusOut)
 {
 	Result ret = httpcOpenContext(context, method, url, 1);
 	if (R_FAILED(ret))
@@ -81,8 +81,10 @@ static Result httpRequest(httpcContext* context, HTTPC_RequestMethod method, con
 	if (R_FAILED(ret))
 		goto cleanup;
 
-	if (headerName && headerValue) {
-		ret = httpcAddRequestHeaderField(context, headerName, headerValue);
+	for (int i = 0; i < headerCount; i++) {
+		if (!headers[i].name || !headers[i].value)
+			continue;
+		ret = httpcAddRequestHeaderField(context, headers[i].name, headers[i].value);
 		if (R_FAILED(ret))
 			goto cleanup;
 	}
@@ -132,7 +134,7 @@ cleanup:
 }
 
 static Result httpDoRequest(const char* url, HTTPC_RequestMethod method, const char* body,
-	const char* headerName, const char* headerValue, char** out, size_t* outLen)
+	const HttpHeader* headers, int headerCount, char** out, size_t* outLen)
 {
 	if (!url || !out || !outLen)
 		return HTTP_ERR_GENERIC;
@@ -154,7 +156,7 @@ static Result httpDoRequest(const char* url, HTTPC_RequestMethod method, const c
 
 	while (true) {
 		u32 status = 0;
-		ret = httpRequest(&context, method, currentUrl, body, headerName, headerValue, &status);
+		ret = httpRequest(&context, method, currentUrl, body, headers, headerCount, &status);
 		if (R_FAILED(ret)) {
 			free(redirectUrl);
 			return ret;
@@ -205,24 +207,38 @@ void httpGlobalExit(void)
 
 Result httpGet(const char* url, char** out, size_t* outLen)
 {
-	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, NULL, NULL, out, outLen);
+	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, NULL, 0, out, outLen);
 }
 
 Result httpGetWithHeader(const char* url, const char* headerName, const char* headerValue,
 	char** out, size_t* outLen)
 {
-	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, headerName, headerValue, out, outLen);
+	HttpHeader headers[] = { { headerName, headerValue } };
+	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, headers, 1, out, outLen);
+}
+
+Result httpGetWithHeaders(const char* url, const HttpHeader* headers, int headerCount,
+	char** out, size_t* outLen)
+{
+	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, headers, headerCount, out, outLen);
 }
 
 Result httpPost(const char* url, const char* body, char** out, size_t* outLen)
 {
-	return httpDoRequest(url, HTTPC_METHOD_POST, body, NULL, NULL, out, outLen);
+	return httpDoRequest(url, HTTPC_METHOD_POST, body, NULL, 0, out, outLen);
 }
 
 Result httpPostWithHeader(const char* url, const char* body, const char* headerName,
 	const char* headerValue, char** out, size_t* outLen)
 {
-	return httpDoRequest(url, HTTPC_METHOD_POST, body, headerName, headerValue, out, outLen);
+	HttpHeader headers[] = { { headerName, headerValue } };
+	return httpDoRequest(url, HTTPC_METHOD_POST, body, headers, 1, out, outLen);
+}
+
+Result httpPostWithHeaders(const char* url, const char* body, const HttpHeader* headers,
+	int headerCount, char** out, size_t* outLen)
+{
+	return httpDoRequest(url, HTTPC_METHOD_POST, body, headers, headerCount, out, outLen);
 }
 
 Result httpDownloadFile(const char* url, const char* path)
@@ -254,7 +270,7 @@ Result httpDownloadFileWithProgress(const char* url, const char* path,
 
 	while (true) {
 		u32 status = 0;
-		ret = httpRequest(&context, HTTPC_METHOD_GET, currentUrl, NULL, NULL, NULL, &status);
+		ret = httpRequest(&context, HTTPC_METHOD_GET, currentUrl, NULL, NULL, 0, &status);
 		if (R_FAILED(ret)) {
 			free(redirectUrl);
 			fclose(f);

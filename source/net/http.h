@@ -15,6 +15,16 @@ Result httpPost(const char* url, const char* body, char** out, size_t* outLen);
 Result httpPostWithHeader(const char* url, const char* body, const char* headerName,
 	const char* headerValue, char** out, size_t* outLen);
 
+typedef struct {
+	const char* name;
+	const char* value;
+} HttpHeader;
+
+Result httpGetWithHeaders(const char* url, const HttpHeader* headers, int headerCount,
+	char** out, size_t* outLen);
+Result httpPostWithHeaders(const char* url, const char* body, const HttpHeader* headers,
+	int headerCount, char** out, size_t* outLen);
+
 /* HTTP_ERR_STATUS is returned when the server replies with a non-200 status.
    Call httpLastStatus() to read the actual status code. */
 #define HTTP_ERR_STATUS ((Result)-2)

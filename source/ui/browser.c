@@ -54,7 +54,8 @@ static Result browserEnsureAuthenticated(void)
     if (g_app.config.username[0] != '\0' && g_app.config.password[0] != '\0') {
         char token[CONFIG_MAX_KEY];
         Result res = jellyfinAuthByPassword(g_app.config.serverUrl,
-            g_app.config.username, g_app.config.password, token, sizeof(token));
+            g_app.config.username, g_app.config.password, token, sizeof(token),
+            g_app.userId, sizeof(g_app.userId));
         if (R_FAILED(res))
             return res;
         strncpy(g_app.authToken, token, sizeof(g_app.authToken) - 1);
@@ -77,7 +78,8 @@ static Result browserEnsureAuthenticated(void)
         return -1;
 
     Result res = jellyfinAuthByPassword(g_app.config.serverUrl,
-        g_app.config.username, password, g_app.authToken, sizeof(g_app.authToken));
+        g_app.config.username, password, g_app.authToken, sizeof(g_app.authToken),
+        g_app.userId, sizeof(g_app.userId));
     memset(password, 0, sizeof(password));
     return res;
 }
