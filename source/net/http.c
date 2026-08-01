@@ -40,7 +40,8 @@ static Result httpReadChunk(httpcContext* context, u8* buf, u32 size, u64 timeou
 
 static Result httpReadResponse(httpcContext* context, char** out, size_t* outLen)
 {
-	char* buf = (char*)malloc(HTTP_CHUNK_SIZE);
+	size_t cap = HTTP_CHUNK_SIZE;
+	char* buf = (char*)malloc(cap);
 	if (!buf)
 		return HTTP_ERR_GENERIC;
 
@@ -48,23 +49,28 @@ static Result httpReadResponse(httpcContext* context, char** out, size_t* outLen
 	Result ret = 0;
 
 	while (true) {
-		u32 read = 0;
-		ret = httpReadChunk(context, (u8*)(buf + size), HTTP_CHUNK_SIZE,
-			HTTP_TIMEOUT_NS, &read);
-		size += read;
-
-		if (ret == (s32)HTTPC_RESULTCODE_DOWNLOADPENDING) {
-			if (size + HTTP_CHUNK_SIZE < size) {
-				free(buf);
-				return HTTP_ERR_GENERIC;
-			}
-			char* tmp = (char*)realloc(buf, size + HTTP_CHUNK_SIZE);
+		/* Grow geometrically so a large body doesn't realloc+memcpy the
+		   whole accumulated buffer on every chunk. */
+		if (size + HTTP_CHUNK_SIZE > cap) {
+			size_t newCap = cap * 2;
+			char* tmp = (char*)realloc(buf, newCap);
 			if (!tmp) {
 				free(buf);
 				return HTTP_ERR_GENERIC;
 			}
 			buf = tmp;
-		} else if (R_SUCCEEDED(ret)) {
+			cap = newCap;
+		}
+
+		u32 read = 0;
+		ret = httpReadChunk(context, (u8*)(buf + size), HTTP_CHUNK_SIZE,
+			HTTP_TIMEOUT_NS, &read);
+		size += read;
+
+		if (ret == (s32)HTTPC_RESULTCODE_DOWNLOADPENDING)
+			continue;
+
+		if (R_SUCCEEDED(ret)) {
 			char* tmp = (char*)realloc(buf, size + 1);
 			if (!tmp) {
 				free(buf);
@@ -75,10 +81,10 @@ static Result httpReadResponse(httpcContext* context, char** out, size_t* outLen
 			*out = buf;
 			*outLen = size;
 			return 0;
-		} else {
-			free(buf);
-			return ret;
 		}
+
+		free(buf);
+		return ret;
 	}
 }
 

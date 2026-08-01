@@ -125,7 +125,7 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 	char auth[JF_AUTH_HEADER_MAX];
 	snprintf(auth, sizeof(auth),
 		"MediaBrowser Client=\"Jellyfin3DS\", Device=\"Nintendo 3DS\", "
-		"DeviceId=\"j3ds-3ds\", Version=\"0.1.13\"");
+		"DeviceId=\"j3ds-3ds\", Version=\"0.1.14\"");
 
 	HttpHeader headers[] = {
 		{ "Content-Type", "application/json" },
@@ -215,7 +215,8 @@ Result jellyfinGetItems(const char* serverUrl, const char* apiKey, const char* p
 		pos += (size_t)n;
 	}
 
-	n = snprintf(url + pos, sizeof(url) - pos, "&Limit=256");
+	n = snprintf(url + pos, sizeof(url) - pos,
+		"&Limit=256&EnableUserData=false&EnableImageInfo=false&Fields=");
 	if (n < 0 || (size_t)n >= sizeof(url) - pos)
 		return -1;
 	pos += (size_t)n;

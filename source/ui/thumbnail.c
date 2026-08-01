@@ -134,10 +134,10 @@ static bool thumbnailBuildTexture(const u32* rgba, int srcW, int srcH,
 	memset(canvas, 0, bytes);
 
 	for (int y = 0; y < dstH; ++y) {
-		int sy = (int)((float)y / scale);
+		int sy = (y * srcH) / dstH;
 		if (sy >= srcH) sy = srcH - 1;
 		for (int x = 0; x < dstW; ++x) {
-			int sx = (int)((float)x / scale);
+			int sx = (x * srcW) / dstW;
 			if (sx >= srcW) sx = srcW - 1;
 			canvas[(size_t)y * texW + x] = rgba[(size_t)sy * srcW + sx];
 		}

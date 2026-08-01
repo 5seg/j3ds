@@ -56,6 +56,24 @@ static char s_status[BROWSER_STATUS_MAX] = "";
 static bool s_downloading = false;
 static SortMode s_sortMode = SORT_TITLE;
 
+/* Async browse load (auth + HTTP + JSON parse run off the render thread). */
+static Thread s_loadThread = NULL;
+static volatile bool s_loadDone = false;
+static bool s_loading = false;
+static Result s_loadRes = 0;
+static char s_loadParentId[64] = "";
+static ItemType s_loadType = ITEM_TYPE_UNKNOWN;
+static int s_restoreSel = -1;
+static int s_restoreScroll = 0;
+
+/* Async X: cache download. */
+static Thread s_dlThread = NULL;
+static volatile bool s_dlDone = false;
+static Result s_dlRes = 0;
+static char s_dlItemId[64] = "";
+static char s_dlItemName[BROWSER_MAX_NAME] = "";
+static char s_dlPath[512] = "";
+
 static Result browserEnsureAuthenticated(void)
 {
     /* Password login is preferred. The stored API key is deliberately kept
@@ -197,20 +215,23 @@ static void browserDownloadProgress(size_t downloaded, size_t total)
 
 static Result browserDownloadSong(const char* itemId, const char* path)
 {
-    char url[BROWSER_STREAM_URL_MAX];
-    Result res = jellyfinGetStreamUrl(g_app.config.serverUrl, appAuthToken(),
-        itemId, url, sizeof(url));
-    if (R_FAILED(res))
-        return res;
+	char url[BROWSER_STREAM_URL_MAX];
+	Result res = jellyfinGetStreamUrl(g_app.config.serverUrl, appAuthToken(),
+		itemId, url, sizeof(url));
+	if (R_FAILED(res))
+		return res;
 
-    if (!browserEnsureAudioCacheDir())
-        return -1;
+	if (!browserEnsureAudioCacheDir())
+		return -1;
 
-    s_downloading = true;
-    browserSetStatus("Downloading...");
-    res = httpDownloadFileWithProgress(url, path, browserDownloadProgress);
-    s_downloading = false;
-    return res;
+	return httpDownloadFileWithProgress(url, path, browserDownloadProgress);
+}
+
+static void cacheDownloadThread(void* arg)
+{
+	(void)arg;
+	s_dlRes = browserDownloadSong(s_dlItemId, s_dlPath);
+	s_dlDone = true;
 }
 
 static void browserPushLevel(void)
@@ -256,73 +277,93 @@ static void browserPlaySong(const BrowserItem* song)
 
 static void browserDownloadOnly(const BrowserItem* song)
 {
-    char path[512];
-    browserBuildAudioPath(song->id, path, sizeof(path));
+	char path[512];
+	browserBuildAudioPath(song->id, path, sizeof(path));
 
-    if (access(path, F_OK) == 0) {
-        browserSetStatus("Already cached");
-        return;
-    }
+	if (access(path, F_OK) == 0) {
+		browserSetStatus("Already cached");
+		return;
+	}
 
-    Result res = browserDownloadSong(song->id, path);
-    if (R_FAILED(res))
-        browserSetStatus("Download failed: %08lX", (unsigned long)res);
-    else
-        browserSetStatus("Downloaded %s", song->name);
+	if (s_downloading)
+		return;
+
+	strncpy(s_dlItemId, song->id, sizeof(s_dlItemId) - 1);
+	s_dlItemId[sizeof(s_dlItemId) - 1] = '\0';
+	strncpy(s_dlItemName, song->name, sizeof(s_dlItemName) - 1);
+	s_dlItemName[sizeof(s_dlItemName) - 1] = '\0';
+	strncpy(s_dlPath, path, sizeof(s_dlPath) - 1);
+	s_dlPath[sizeof(s_dlPath) - 1] = '\0';
+
+	s_downloading = true;
+	s_dlDone = false;
+	browserSetStatus("Downloading...");
+
+	s_dlThread = threadCreate(cacheDownloadThread, NULL, 32 * 1024, 0x31, -1, false);
+	if (!s_dlThread) {
+		s_downloading = false;
+		browserSetStatus("Download failed to start");
+	}
 }
 
 static void browserLoadRootItems(void)
 {
-    s_state.currentType = ITEM_TYPE_UNKNOWN;
-    s_state.currentId[0] = '\0';
-    s_sortMode = SORT_TITLE;
-    browserResetItems();
+	s_state.currentType = ITEM_TYPE_UNKNOWN;
+	s_state.currentId[0] = '\0';
+	s_sortMode = SORT_TITLE;
+	browserResetItems();
 
-    if (g_app.config.serverUrl[0] == '\0' || appAuthToken()[0] == '\0') {
-        browserSetStatus("Not authenticated");
-        return;
-    }
+	if (g_app.config.serverUrl[0] == '\0' || appAuthToken()[0] == '\0')
+		return;
 
-    BrowserItem* p = &s_state.items[s_state.count++];
-    p->type = ITEM_TYPE_PLAYLISTS;
-    snprintf(p->name, sizeof(p->name), "Playlists");
-    snprintf(p->id, sizeof(p->id), "playlists");
+	BrowserItem* p = &s_state.items[s_state.count++];
+	p->type = ITEM_TYPE_PLAYLISTS;
+	snprintf(p->name, sizeof(p->name), "Playlists");
+	snprintf(p->id, sizeof(p->id), "playlists");
 
-    BrowserItem* m = &s_state.items[s_state.count++];
-    m->type = ITEM_TYPE_ALL;
-    snprintf(m->name, sizeof(m->name), "All Musics");
-    snprintf(m->id, sizeof(m->id), "allmusic");
-
-    browserSetStatus("Loaded %d lists", s_state.count);
+	BrowserItem* m = &s_state.items[s_state.count++];
+	m->type = ITEM_TYPE_ALL;
+	snprintf(m->name, sizeof(m->name), "All Musics");
+	snprintf(m->id, sizeof(m->id), "allmusic");
 }
 
 static void browserItemArtist(json_t* it, char* out, size_t outLen)
 {
-    out[0] = '\0';
-    json_t* arr = json_object_get(it, "Artists");
-    if (json_is_array(arr) && json_array_size(arr) > 0) {
-        const char* n = jsonGetString(json_array_get(arr, 0), "Name");
-        if (n) {
-            strncpy(out, n, outLen - 1);
-            out[outLen - 1] = '\0';
-            return;
-        }
-    }
-    const char* a = jsonGetString(it, "AlbumArtist");
-    if (a) {
-        strncpy(out, a, outLen - 1);
-        out[outLen - 1] = '\0';
-    }
+	out[0] = '\0';
+	json_t* arr = json_object_get(it, "Artists");
+	if (json_is_array(arr) && json_array_size(arr) > 0) {
+		json_t* first = json_array_get(arr, 0);
+		const char* n = NULL;
+		if (json_is_string(first))
+			n = json_string_value(first);
+		else
+			n = jsonGetString(first, "Name");
+		if (n) {
+			strncpy(out, n, outLen - 1);
+			out[outLen - 1] = '\0';
+			return;
+		}
+	}
+	const char* a = jsonGetString(it, "AlbumArtist");
+	if (a) {
+		strncpy(out, a, outLen - 1);
+		out[outLen - 1] = '\0';
+	}
 }
 
 static void browserItemAlbum(json_t* it, char* out, size_t outLen)
 {
-    out[0] = '\0';
-    const char* n = jsonGetString(json_object_get(it, "Album"), "Name");
-    if (n) {
-        strncpy(out, n, outLen - 1);
-        out[outLen - 1] = '\0';
-    }
+	out[0] = '\0';
+	json_t* album = json_object_get(it, "Album");
+	const char* n = NULL;
+	if (json_is_string(album))
+		n = json_string_value(album);
+	else
+		n = jsonGetString(album, "Name");
+	if (n) {
+		strncpy(out, n, outLen - 1);
+		out[outLen - 1] = '\0';
+	}
 }
 
 void browserInit(void)
@@ -331,7 +372,12 @@ void browserInit(void)
     memset(&s_state, 0, sizeof(s_state));
     s_status[0] = '\0';
     s_downloading = false;
+    s_loading = false;
+    s_loadDone = false;
+    s_dlDone = false;
 }
+
+static void browserStartLoad(const char* parentId, ItemType type);
 
 void browserLoadRoot(void)
 {
@@ -342,126 +388,230 @@ void browserLoadRoot(void)
         return;
     }
 
-    Result authRes = browserEnsureAuthenticated();
-    if (R_FAILED(authRes)) {
-        if (authRes == HTTP_ERR_STATUS)
-            browserSetStatus("Login failed: HTTP %d", httpLastStatus());
-        else
-            browserSetStatus("Login failed: %08lX", (unsigned long)authRes);
-        return;
+    /* The loader thread must not show the modal keyboard, so prompt for a
+       missing password here on the render thread first. */
+    if (g_app.config.username[0] != '\0' && g_app.config.password[0] == '\0'
+        && g_app.config.apiKey[0] == '\0') {
+        char password[CONFIG_MAX_PASSWORD];
+        if (!inputShowKeyboardPassword(password, sizeof(password), "Jellyfin password"))
+            return;
+        strncpy(g_app.config.password, password, sizeof(g_app.config.password) - 1);
+        g_app.config.password[sizeof(g_app.config.password) - 1] = '\0';
+        memset(password, 0, sizeof(password));
     }
 
-    browserLoadRootItems();
+    browserStartLoad(NULL, ITEM_TYPE_UNKNOWN);
 }
 
 void browserLoadItems(const char* parentId, ItemType type)
 {
-    browserResetItems();
-    s_state.currentType = type;
-    if (parentId) {
-        strncpy(s_state.currentId, parentId, sizeof(s_state.currentId) - 1);
-        s_state.currentId[sizeof(s_state.currentId) - 1] = '\0';
-    } else {
-        s_state.currentId[0] = '\0';
-    }
+	browserResetItems();
+	s_state.currentType = type;
+	if (parentId) {
+		strncpy(s_state.currentId, parentId, sizeof(s_state.currentId) - 1);
+		s_state.currentId[sizeof(s_state.currentId) - 1] = '\0';
+	} else {
+		s_state.currentId[0] = '\0';
+	}
 
-    if (g_app.config.serverUrl[0] == '\0' || appAuthToken()[0] == '\0') {
-        browserSetStatus("Not authenticated");
+	if (g_app.config.serverUrl[0] == '\0' || appAuthToken()[0] == '\0')
+		return;
+
+	const char* includeTypes = NULL;
+	const char* sortBy = NULL;
+	const char* sortOrder = NULL;
+	const char* queryParentId = parentId;
+
+	switch (type) {
+	case ITEM_TYPE_PLAYLISTS:
+		includeTypes = "Playlist";
+		sortBy = "SortName";
+		sortOrder = "Ascending";
+		break;
+	case ITEM_TYPE_ALL:
+		includeTypes = "Audio";
+		browserSortParams(&sortBy, &sortOrder);
+		break;
+	case ITEM_TYPE_PLAYLIST:
+		includeTypes = "Audio";
+		break;
+	default:
+		includeTypes = "Audio";
+		break;
+	}
+
+	char* json = NULL;
+	size_t len = 0;
+	Result res = jellyfinGetItems(g_app.config.serverUrl, appAuthToken(),
+		queryParentId, includeTypes, sortBy, sortOrder, &json, &len);
+	if (R_FAILED(res)) {
+		s_loadRes = res;
+		return;
+	}
+
+	json_error_t err;
+	json_t* root = json_loads(json, 0, &err);
+	free(json);
+	if (!root) {
+		s_loadRes = -1;
+		return;
+	}
+
+	json_t* items = json_object_get(root, "Items");
+	if (!json_is_array(items)) {
+		json_decref(root);
+		s_loadRes = -1;
+		return;
+	}
+
+	size_t i, n = json_array_size(items);
+	if (n > BROWSER_MAX_ITEMS)
+		n = BROWSER_MAX_ITEMS;
+
+	for (i = 0; i < n; ++i) {
+		json_t* it = json_array_get(items, i);
+		if (!json_is_object(it))
+			continue;
+		const char* id = jsonGetString(it, "Id");
+		const char* name = jsonGetString(it, "Name");
+		const char* typeStr = jsonGetString(it, "Type");
+		if (!id || !name)
+			continue;
+
+		BrowserItem* b = &s_state.items[s_state.count++];
+		strncpy(b->id, id, sizeof(b->id) - 1);
+		b->id[sizeof(b->id) - 1] = '\0';
+		strncpy(b->name, name, sizeof(b->name) - 1);
+		b->name[sizeof(b->name) - 1] = '\0';
+		b->type = browserTypeFromString(typeStr);
+		browserItemArtist(it, b->artist, sizeof(b->artist));
+		browserItemAlbum(it, b->album, sizeof(b->album));
+		if (parentId) {
+			strncpy(b->parentId, parentId, sizeof(b->parentId) - 1);
+			b->parentId[sizeof(b->parentId) - 1] = '\0';
+		} else {
+			b->parentId[0] = '\0';
+		}
+	}
+
+	json_decref(root);
+	s_loadRes = 0;
+}
+
+/* Runs on the loader thread. */
+static void browserLoadThread(void* arg)
+{
+	(void)arg;
+
+	if (s_loadType == ITEM_TYPE_UNKNOWN) {
+		s_loadRes = browserEnsureAuthenticated();
+		if (R_FAILED(s_loadRes))
+			goto done;
+		browserLoadRootItems();
+		s_loadRes = 0;
+	} else {
+		browserLoadItems(s_loadParentId, s_loadType);
+	}
+
+done:
+	s_loadDone = true;
+}
+
+static void browserStartLoad(const char* parentId, ItemType type)
+{
+	if (s_loading)
+		return;
+
+	/* Join any load that finished after we left the screen. */
+	if (s_loadThread) {
+		threadJoin(s_loadThread, UINT64_MAX);
+		threadFree(s_loadThread);
+		s_loadThread = NULL;
+	}
+
+	s_loadType = type;
+	if (parentId) {
+		strncpy(s_loadParentId, parentId, sizeof(s_loadParentId) - 1);
+		s_loadParentId[sizeof(s_loadParentId) - 1] = '\0';
+	} else {
+		s_loadParentId[0] = '\0';
+	}
+
+	s_loading = true;
+	s_loadDone = false;
+	s_loadRes = 0;
+
+	s_loadThread = threadCreate(browserLoadThread, NULL, 32 * 1024, 0x31, -1, false);
+	if (!s_loadThread) {
+		s_loading = false;
+		browserSetStatus("Load failed to start");
+		return;
+	}
+
+	browserSetStatus("Loading...");
+}
+
+static void browserSetLoadedStatus(void)
+{
+	if (R_FAILED(s_loadRes)) {
+		if (s_loadRes == HTTP_ERR_STATUS)
+			browserSetStatus("Load failed: HTTP %d", httpLastStatus());
+		else if (s_loadType == ITEM_TYPE_UNKNOWN)
+			browserSetStatus("Login failed: %08lX", (unsigned long)s_loadRes);
+		else
+			browserSetStatus("Load failed: %08lX", (unsigned long)s_loadRes);
+	} else if (s_state.count == 0) {
+		browserSetStatus("No items");
+	} else if (s_loadType == ITEM_TYPE_UNKNOWN) {
+		browserSetStatus("Loaded %d lists", s_state.count);
+	} else if (s_loadType == ITEM_TYPE_ALL) {
+		browserSetStatus("Loaded %d songs (sort: %s)", s_state.count,
+			browserSortName(s_sortMode));
+	} else {
+		browserSetStatus("Loaded %d %s", s_state.count, browserTypeName(s_loadType));
+	}
+}
+
+static void browserPollDownloadDone(void)
+{
+    if (!s_dlDone)
         return;
+    if (s_dlThread) {
+        threadJoin(s_dlThread, UINT64_MAX);
+        threadFree(s_dlThread);
+        s_dlThread = NULL;
     }
-
-    const char* includeTypes = NULL;
-    const char* sortBy = NULL;
-    const char* sortOrder = NULL;
-    const char* queryParentId = parentId;
-
-    switch (type) {
-    case ITEM_TYPE_PLAYLISTS:
-        includeTypes = "Playlist";
-        sortBy = "SortName";
-        sortOrder = "Ascending";
-        break;
-    case ITEM_TYPE_ALL:
-        includeTypes = "Audio";
-        browserSortParams(&sortBy, &sortOrder);
-        break;
-    case ITEM_TYPE_PLAYLIST:
-        includeTypes = "Audio";
-        break;
-    default:
-        includeTypes = "Audio";
-        break;
-    }
-
-    char* json = NULL;
-    size_t len = 0;
-    Result res = jellyfinGetItems(g_app.config.serverUrl, appAuthToken(),
-        queryParentId, includeTypes, sortBy, sortOrder, &json, &len);
-    if (R_FAILED(res)) {
-        if (res == HTTP_ERR_STATUS)
-            browserSetStatus("Load failed: HTTP %d", httpLastStatus());
-        else
-            browserSetStatus("Load failed: %08lX", (unsigned long)res);
-        return;
-    }
-
-    json_error_t err;
-    json_t* root = json_loads(json, 0, &err);
-    free(json);
-    if (!root) {
-        browserSetStatus("Parse error");
-        return;
-    }
-
-    json_t* items = json_object_get(root, "Items");
-    if (!json_is_array(items)) {
-        json_decref(root);
-        browserSetStatus("No Items");
-        return;
-    }
-
-    size_t i, n = json_array_size(items);
-    if (n > BROWSER_MAX_ITEMS)
-        n = BROWSER_MAX_ITEMS;
-
-    for (i = 0; i < n; ++i) {
-        json_t* it = json_array_get(items, i);
-        if (!json_is_object(it))
-            continue;
-        const char* id = jsonGetString(it, "Id");
-        const char* name = jsonGetString(it, "Name");
-        const char* typeStr = jsonGetString(it, "Type");
-        if (!id || !name)
-            continue;
-
-        BrowserItem* b = &s_state.items[s_state.count++];
-        strncpy(b->id, id, sizeof(b->id) - 1);
-        b->id[sizeof(b->id) - 1] = '\0';
-        strncpy(b->name, name, sizeof(b->name) - 1);
-        b->name[sizeof(b->name) - 1] = '\0';
-        b->type = browserTypeFromString(typeStr);
-        browserItemArtist(it, b->artist, sizeof(b->artist));
-        browserItemAlbum(it, b->album, sizeof(b->album));
-        if (parentId) {
-            strncpy(b->parentId, parentId, sizeof(b->parentId) - 1);
-            b->parentId[sizeof(b->parentId) - 1] = '\0';
-        } else {
-            b->parentId[0] = '\0';
-        }
-    }
-
-    json_decref(root);
-    if (type == ITEM_TYPE_ALL)
-        browserSetStatus("Loaded %d songs (sort: %s)", s_state.count,
-            browserSortName(s_sortMode));
+    s_downloading = false;
+    if (R_FAILED(s_dlRes))
+        browserSetStatus("Download failed: %08lX", (unsigned long)s_dlRes);
     else
-        browserSetStatus("Loaded %d %s", s_state.count, browserTypeName(type));
+        browserSetStatus("Downloaded %s", s_dlItemName);
+}
+
+static void browserPollLoadDone(void)
+{
+    if (!s_loadDone)
+        return;
+    if (s_loadThread) {
+        threadJoin(s_loadThread, UINT64_MAX);
+        threadFree(s_loadThread);
+        s_loadThread = NULL;
+    }
+    s_loading = false;
+    if (s_restoreSel >= 0) {
+        s_state.selected = s_restoreSel;
+        s_state.scroll = s_restoreScroll;
+        s_restoreSel = -1;
+        s_restoreScroll = 0;
+        browserUpdateScroll();
+    }
+    browserSetLoadedStatus();
 }
 
 void browserUpdate(void)
 {
-    if (s_downloading)
-        return;
+    browserPollDownloadDone();
+    browserPollLoadDone();
 
     if (g_app.touchDown) {
         if (g_app.touch.py >= BROWSER_HINT_Y) {
@@ -478,6 +628,9 @@ void browserUpdate(void)
             }
         }
     }
+
+    if (s_loading)
+        return;
 
     if (g_app.kDown & KEY_UP) {
         s_state.selected--;
@@ -512,15 +665,9 @@ void browserUpdate(void)
             screenChange(SCREEN_HOME);
         } else {
             BrowserLevel* lvl = &s_stack[--s_stackTop];
-            int sel = lvl->selected;
-            int scroll = lvl->scroll;
-            if (lvl->type == ITEM_TYPE_UNKNOWN)
-                browserLoadRootItems();
-            else
-                browserLoadItems(lvl->id[0] ? lvl->id : NULL, lvl->type);
-            s_state.selected = sel;
-            s_state.scroll = scroll;
-            browserUpdateScroll();
+            s_restoreSel = lvl->selected;
+            s_restoreScroll = lvl->scroll;
+            browserStartLoad(lvl->id[0] ? lvl->id : NULL, lvl->type);
         }
         return;
     }
@@ -533,15 +680,15 @@ void browserUpdate(void)
         switch (item->type) {
         case ITEM_TYPE_PLAYLISTS:
             browserPushLevel();
-            browserLoadItems(NULL, ITEM_TYPE_PLAYLISTS);
+            browserStartLoad(NULL, ITEM_TYPE_PLAYLISTS);
             break;
         case ITEM_TYPE_ALL:
             browserPushLevel();
-            browserLoadItems(NULL, ITEM_TYPE_ALL);
+            browserStartLoad(NULL, ITEM_TYPE_ALL);
             break;
         case ITEM_TYPE_PLAYLIST:
             browserPushLevel();
-            browserLoadItems(item->id, ITEM_TYPE_PLAYLIST);
+            browserStartLoad(item->id, ITEM_TYPE_PLAYLIST);
             break;
         case ITEM_TYPE_SONG:
             browserPlaySong(item);
@@ -555,12 +702,9 @@ void browserUpdate(void)
         const BrowserItem* item = &s_state.items[s_state.selected];
         if (s_state.currentType == ITEM_TYPE_ALL && item->type == ITEM_TYPE_SONG) {
             s_sortMode = (SortMode)((s_sortMode + 1) % SORT_COUNT);
-            int sel = s_state.selected;
-            int scroll = s_state.scroll;
-            browserLoadItems(NULL, ITEM_TYPE_ALL);
-            s_state.selected = sel;
-            s_state.scroll = scroll;
-            browserUpdateScroll();
+            s_restoreSel = s_state.selected;
+            s_restoreScroll = s_state.scroll;
+            browserStartLoad(NULL, ITEM_TYPE_ALL);
         }
     }
 
