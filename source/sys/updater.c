@@ -100,8 +100,8 @@ static void checkThreadFunc(void* arg)
 		"https://api.github.com/repos/" UPD_OWNER "/" UPD_REPO "/releases/latest",
 		&body, &bodyLen);
 	if (R_FAILED(ret)) {
-		updaterSetMessage("Update check failed (ret=%08lX, HTTP %d)",
-			(unsigned long)ret, httpLastStatus());
+		updaterSetMessage("Update check failed (v%s, ret=%08lX, HTTP %d)",
+			APP_VERSION, (unsigned long)ret, httpLastStatus());
 		s_up.threadDone = true;
 		return;
 	}
