@@ -10,22 +10,36 @@ GuiState g_gui;
 
 bool guiInit(void)
 {
-	if (!C2D_Init(C2D_DEFAULT_MAX_OBJECTS))
+	if (!C3D_Init(C3D_DEFAULT_CMDBUF_SIZE))
 		return false;
+	if (!C2D_Init(C2D_DEFAULT_MAX_OBJECTS)) {
+		C3D_Fini();
+		return false;
+	}
 	C2D_Prepare();
 
 	g_gui.top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
 	g_gui.bottom = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
-	if (!g_gui.top || !g_gui.bottom)
+	if (!g_gui.top || !g_gui.bottom) {
+		C2D_Fini();
+		C3D_Fini();
 		return false;
+	}
 
 	g_gui.font = C2D_FontLoadSystem(CFG_REGION_USA);
-	if (!g_gui.font)
+	if (!g_gui.font) {
+		C2D_Fini();
+		C3D_Fini();
 		return false;
+	}
 
 	g_gui.buf = C2D_TextBufNew(GUI_DYNBUF_GLYPHS);
-	if (!g_gui.buf)
+	if (!g_gui.buf) {
+		C2D_FontFree(g_gui.font);
+		C2D_Fini();
+		C3D_Fini();
 		return false;
+	}
 
 	return true;
 }
@@ -37,6 +51,7 @@ void guiExit(void)
 	if (g_gui.font)
 		C2D_FontFree(g_gui.font);
 	C2D_Fini();
+	C3D_Fini();
 	memset(&g_gui, 0, sizeof(g_gui));
 }
 
