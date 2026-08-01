@@ -106,6 +106,51 @@ static ThumbnailCacheEntry* thumbnailFindCached(unsigned int hash)
 	return NULL;
 }
 
+/* Area-average (box) downscale srcW x srcH -> dstW x dstH into dst.
+   Every source pixel covered by a destination pixel contributes equally,
+   which keeps edges clean (no nearest-neighbour aliasing). Integer math. */
+static void thumbnailResizeBox(const u32* src, int srcW, int srcH,
+	u32* dst, int dstW, int dstH)
+{
+	for (int y = 0; y < dstH; ++y) {
+		int y0 = (int)(((long long)y * srcH) / dstH);
+		int y1 = (int)(((long long)(y + 1) * srcH) / dstH);
+		if (y1 <= y0)
+			y1 = y0 + 1;
+		if (y1 > srcH)
+			y1 = srcH;
+
+		for (int x = 0; x < dstW; ++x) {
+			int x0 = (int)(((long long)x * srcW) / dstW);
+			int x1 = (int)(((long long)(x + 1) * srcW) / dstW);
+			if (x1 <= x0)
+				x1 = x0 + 1;
+			if (x1 > srcW)
+				x1 = srcW;
+
+			unsigned long long r = 0, g = 0, b = 0, a = 0;
+			unsigned int count = 0;
+			for (int sy = y0; sy < y1; ++sy) {
+				const u32* row = src + (size_t)sy * srcW;
+				for (int sx = x0; sx < x1; ++sx) {
+					u32 p = row[sx];
+					r += (p >> 24) & 0xFF;
+					g += (p >> 16) & 0xFF;
+					b += (p >> 8) & 0xFF;
+					a += p & 0xFF;
+					count++;
+				}
+			}
+
+			u32 pr = (u32)(r / count);
+			u32 pg = (u32)(g / count);
+			u32 pb = (u32)(b / count);
+			u32 pa = (u32)(a / count);
+			dst[(size_t)y * dstW + x] = (pr << 24) | (pg << 16) | (pb << 8) | pa;
+		}
+	}
+}
+
 /* Downscale a decoded RGBA8 image into a power-of-two texture canvas. */
 static bool thumbnailBuildTexture(const u32* rgba, int srcW, int srcH,
 	ThumbnailCacheEntry* entry)
@@ -133,18 +178,10 @@ static bool thumbnailBuildTexture(const u32* rgba, int srcW, int srcH,
 		return false;
 	memset(canvas, 0, bytes);
 
-	for (int y = 0; y < dstH; ++y) {
-		int sy = (y * srcH) / dstH;
-		if (sy >= srcH) sy = srcH - 1;
-		for (int x = 0; x < dstW; ++x) {
-			int sx = (x * srcW) / dstW;
-			if (sx >= srcW) sx = srcW - 1;
-			canvas[(size_t)y * texW + x] = rgba[(size_t)sy * srcW + sx];
-		}
-	}
+	thumbnailResizeBox(rgba, srcW, srcH, canvas, dstW, dstH);
 
 	bool ok = imageUploadToTexture(&entry->tex, canvas, (int)texW, (int)texH,
-		&entry->subtex, &entry->image);
+		dstW, dstH, &entry->subtex, &entry->image);
 	free(canvas);
 	return ok;
 }

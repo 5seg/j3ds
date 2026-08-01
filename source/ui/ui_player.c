@@ -154,7 +154,7 @@ void playerUpdate(void)
 
     if (g_app.kDown & KEY_B) {
         audioStop();
-        screenChange(SCREEN_HOME);
+        screenChange(g_app.previous == SCREEN_BROWSER ? SCREEN_BROWSER : SCREEN_HOME);
     }
 }
 
@@ -226,9 +226,9 @@ void playerRender(void)
     guiRect(0, 210, GUI_BOT_W, 30, GUI_COL_HEADER);
     guiRect(0, 210, GUI_BOT_W, 1, GUI_COL_DIM);
     if (s_queueCount > 1)
-        guiTextCentered("L/R: Prev/Next   B: Stop   X: Play   Y: Pause",
+        guiTextCentered("L/R: Prev/Next   B: Back   X: Play   Y: Pause",
             GUI_BOT_W / 2.0f, 218, 0.4f, GUI_COL_MUTED);
     else
-        guiTextCentered("B: Stop & home   X: Play   Y: Pause", GUI_BOT_W / 2.0f,
+        guiTextCentered("B: Back   X: Play   Y: Pause", GUI_BOT_W / 2.0f,
             218, 0.4f, GUI_COL_MUTED);
 }

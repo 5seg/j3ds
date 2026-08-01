@@ -127,40 +127,46 @@ static inline u32 nextPowerOfTwo(u32 v)
 	return p;
 }
 
-bool imageUploadToTexture(C3D_Tex* tex, const u32* rgba, int width, int height,
+bool imageUploadToTexture(C3D_Tex* tex, const u32* rgba,
+	int canvasW, int canvasH, int imgW, int imgH,
 	Tex3DS_SubTexture* outSubtex, C2D_Image* out)
 {
-	if (!tex || !rgba || !out || !outSubtex || width <= 0 || height <= 0)
+	if (!tex || !rgba || !out || !outSubtex)
 		return false;
-	if (width > 1024 || height > 1024)
+	if (canvasW <= 0 || canvasH <= 0 || imgW <= 0 || imgH <= 0)
+		return false;
+	if (imgW > canvasW || imgH > canvasH)
+		return false;
+	if (canvasW > 1024 || canvasH > 1024)
 		return false;
 
-	if (!C3D_TexInit(tex, (u16)width, (u16)height, GPU_RGBA8))
+	if (!C3D_TexInit(tex, (u16)canvasW, (u16)canvasH, GPU_RGBA8))
 		return false;
 
 	C3D_TexSetFilter(tex, GPU_LINEAR, GPU_LINEAR);
 	C3D_TexSetWrap(tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
 
 	/* Copy so we don't mutate the caller's buffer during swizzle. */
-	size_t bytes = (size_t)width * (size_t)height * 4;
+	size_t bytes = (size_t)canvasW * (size_t)canvasH * 4;
 	u32* swizzled = (u32*)malloc(bytes);
 	if (!swizzled) {
 		C3D_TexDelete(tex);
 		return false;
 	}
 	memcpy(swizzled, rgba, bytes);
-	imageSwizzleRgba8(swizzled, width, height);
+	imageSwizzleRgba8(swizzled, canvasW, canvasH);
 
 	C3D_TexUpload(tex, swizzled);
 	free(swizzled);
 	C3D_TexFlush(tex);
 
-	outSubtex->width = (u16)width;
-	outSubtex->height = (u16)height;
+	/* The subtexture covers only the real image, not the padding. */
+	outSubtex->width = (u16)imgW;
+	outSubtex->height = (u16)imgH;
 	outSubtex->left = 0.0f;
 	outSubtex->top = 0.0f;
-	outSubtex->right = 1.0f;
-	outSubtex->bottom = 1.0f;
+	outSubtex->right = (float)imgW / (float)canvasW;
+	outSubtex->bottom = (float)imgH / (float)canvasH;
 
 	out->tex = tex;
 	out->subtex = outSubtex;
