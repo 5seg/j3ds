@@ -125,7 +125,7 @@ Result jellyfinAuthByPassword(const char* serverUrl, const char* username, const
 	char auth[JF_AUTH_HEADER_MAX];
 	snprintf(auth, sizeof(auth),
 		"MediaBrowser Client=\"Jellyfin3DS\", Device=\"Nintendo 3DS\", "
-		"DeviceId=\"j3ds-3ds\", Version=\"0.1.16\"");
+		"DeviceId=\"j3ds-3ds\", Version=\"0.1.17\"");
 
 	HttpHeader headers[] = {
 		{ "Content-Type", "application/json" },
@@ -216,7 +216,7 @@ Result jellyfinGetItems(const char* serverUrl, const char* apiKey, const char* p
 	}
 
 	n = snprintf(url + pos, sizeof(url) - pos,
-		"&Limit=256&EnableUserData=false&EnableImageInfo=false&Fields=");
+		"&Limit=256&EnableUserData=false&EnableImageInfo=false&Fields=AlbumId");
 	if (n < 0 || (size_t)n >= sizeof(url) - pos)
 		return -1;
 	pos += (size_t)n;
@@ -245,7 +245,7 @@ void jellyfinGetThumbnailUrl(const char* serverUrl, const char* apiKey, const ch
 	normalizeServerUrl(serverUrl, base, sizeof(base));
 
 	snprintf(out, outLen,
-		"%s/Items/%s/Images/Primary?maxWidth=240&maxHeight=240&quality=90&ApiKey=%s",
+		"%s/Items/%s/Images/Primary?maxWidth=240&maxHeight=240&quality=90&format=jpg&ApiKey=%s",
 		base, itemId ? itemId : "", apiKey ? apiKey : "");
 }
 

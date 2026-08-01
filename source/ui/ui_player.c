@@ -18,11 +18,19 @@
 #define PLAYER_THUMB_Y      24
 #define PLAYER_THUMB_SIZE   240
 
+/* Retry timing for album art loads. A transient network hiccup should not
+   permanently hide the art. */
+#define THUMB_RETRY_DELAY_FRAMES 45 /* ~0.75s at 60fps */
+#define THUMB_MAX_RETRIES        3
+
 static CurrentTrack s_track;
 static char s_thumbUrl[512] = "";
 static Thumbnail s_thumb;
 static bool s_thumbReady = false;
 static bool s_thumbLoading = false;
+static int s_thumbRetryDelay = 0;
+static int s_thumbRetries = 0;
+static bool s_thumbGiveUp = false;
 
 static BrowserItem s_queue[BROWSER_MAX_ITEMS];
 static int s_queueCount = 0;
@@ -43,12 +51,17 @@ void playerInit(void)
     memset(&s_thumb, 0, sizeof(s_thumb));
     s_thumbUrl[0] = '\0';
     s_thumbReady = false;
+    s_thumbLoading = false;
+    s_thumbRetryDelay = 0;
+    s_thumbRetries = 0;
+    s_thumbGiveUp = false;
     strncpy(s_track.title, "Test Track", sizeof(s_track.title) - 1);
     strncpy(s_track.artist, "Test Artist", sizeof(s_track.artist) - 1);
     strncpy(s_track.album, "Test Album", sizeof(s_track.album) - 1);
 }
 
-void playerSetTrack(const char* title, const char* artist, const char* album, const char* itemId)
+void playerSetTrack(const char* title, const char* artist, const char* album,
+	const char* itemId, const char* artItemId)
 {
     memset(&s_track, 0, sizeof(s_track));
 
@@ -61,14 +74,19 @@ void playerSetTrack(const char* title, const char* artist, const char* album, co
     if (itemId)
         strncpy(s_track.itemId, itemId, sizeof(s_track.itemId) - 1);
 
+    /* Songs usually have no image of their own; the cover lives on the
+       album, so request the album's Primary image when we know it. */
     s_track.thumbnailUrl[0] = '\0';
-    if (itemId && itemId[0] != '\0' && g_app.config.serverUrl[0] != '\0') {
-        jellyfinGetThumbnailUrl(g_app.config.serverUrl, appAuthToken(), itemId,
+    if (artItemId && artItemId[0] != '\0' && g_app.config.serverUrl[0] != '\0') {
+        jellyfinGetThumbnailUrl(g_app.config.serverUrl, appAuthToken(), artItemId,
             s_track.thumbnailUrl, sizeof(s_track.thumbnailUrl));
     }
 
     s_thumbReady = false;
     s_thumbLoading = false;
+    s_thumbRetryDelay = 0;
+    s_thumbRetries = 0;
+    s_thumbGiveUp = false;
     s_thumbUrl[0] = '\0';
 }
 
@@ -111,7 +129,8 @@ Result playerPlaySongAt(int index)
         return res;
 
     s_queueIndex = index;
-    playerSetTrack(song->name, song->artist, song->album, song->id);
+    playerSetTrack(song->name, song->artist, song->album, song->id,
+        song->albumId[0] ? song->albumId : song->id);
     return audioPlayStream(url);
 }
 
@@ -163,24 +182,54 @@ void playerRenderTop(void)
     if (s_track.thumbnailUrl[0] == '\0')
         return;
 
-    /* Resolve a pending background load (download + decode on a worker
-       thread, texture upload here on the render thread). */
-    if (thumbnailPollReady(&s_thumb)) {
+    ThumbnailStatus st = thumbnailPollReady(&s_thumb);
+    if (st == THUMB_READY) {
         s_thumbLoading = false;
+        s_thumbRetries = 0;
+        s_thumbRetryDelay = 0;
         if (strcmp(s_thumbUrl, s_track.thumbnailUrl) == 0)
             s_thumbReady = s_thumb.valid;
         else
-            s_thumbReady = false;
+            s_thumbReady = false; /* stale result from a previous track */
+    } else if (st == THUMB_FAILED) {
+        /* The load failed; clear the requested URL so the block below can
+           re-kick it after a short delay (the module dropped the corrupt
+           disk cache entry so this re-downloads). */
+        s_thumbLoading = false;
+        s_thumbReady = false;
+        s_thumbUrl[0] = '\0';
+        if (++s_thumbRetries >= THUMB_MAX_RETRIES) {
+            s_thumbGiveUp = true;
+            s_thumbRetryDelay = 0;
+        } else {
+            s_thumbRetryDelay = THUMB_RETRY_DELAY_FRAMES;
+        }
     }
 
-    /* Kick off a load for a new URL. */
-    if (!s_thumbReady && !s_thumbLoading
-        && strcmp(s_thumbUrl, s_track.thumbnailUrl) != 0) {
+    if (s_thumbReady)
+        goto draw;
+
+    if (s_thumbGiveUp)
+        return;
+
+    if (s_thumbRetryDelay > 0) {
+        s_thumbRetryDelay--;
+        return;
+    }
+
+    /* Start (or restart) the load for the current URL. s_thumbUrl is only
+       recorded on a successful kick so a busy single-slot loader doesn't
+       cause us to skip the request forever. */
+    if (!s_thumbLoading && strcmp(s_thumbUrl, s_track.thumbnailUrl) != 0) {
         strncpy(s_thumbUrl, s_track.thumbnailUrl, sizeof(s_thumbUrl) - 1);
         s_thumbUrl[sizeof(s_thumbUrl) - 1] = '\0';
-        s_thumbLoading = thumbnailLoadAsync(s_thumbUrl);
+        if (thumbnailLoadAsync(s_thumbUrl))
+            s_thumbLoading = true;
+        else
+            s_thumbUrl[0] = '\0'; /* busy; retry next frame */
     }
 
+draw:
     if (!s_thumbReady || !s_thumb.valid)
         return;
 

@@ -17,6 +17,7 @@ typedef struct {
     char name[BROWSER_MAX_NAME];
     char artist[BROWSER_MAX_NAME];
     char album[BROWSER_MAX_NAME];
+    char albumId[64];
     ItemType type;
     char parentId[64];
 } BrowserItem;

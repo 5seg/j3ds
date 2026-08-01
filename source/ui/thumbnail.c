@@ -35,6 +35,21 @@ static unsigned int thumbnailHashUrl(const char* url)
 	return hash;
 }
 
+static void thumbnailCachePath(unsigned int hash, char* out, size_t outLen)
+{
+	char root[512];
+	sdPath(root, sizeof(root), "");
+	snprintf(out, outLen, "%s/%s/%08x.jpg", root, THUMB_CACHE_DIR, hash);
+}
+
+/* Remove the disk cache file so a failed/corrupt download gets re-fetched. */
+static void thumbnailDeleteCache(unsigned int hash)
+{
+	char path[512];
+	thumbnailCachePath(hash, path, sizeof(path));
+	unlink(path);
+}
+
 static bool thumbnailEnsureCacheDir(void)
 {
 	char root[512];
@@ -212,16 +227,8 @@ static void thumbBgThread(void* arg)
 {
 	(void)arg;
 
-	char root[512];
-	sdPath(root, sizeof(root), "");
-
 	char path[512];
-	int n = snprintf(path, sizeof(path), "%s/cache/thumbs/", root);
-	if (n < 0 || (size_t)n >= sizeof(path)) {
-		s_async.done = true;
-		return;
-	}
-	snprintf(path + n, sizeof(path) - n, "%08x.jpg", s_async.hash);
+	thumbnailCachePath(s_async.hash, path, sizeof(path));
 
 	struct stat st;
 	if (stat(path, &st) != 0) {
@@ -246,7 +253,7 @@ static void thumbBgThread(void* arg)
 
 bool thumbnailLoadAsync(const char* url)
 {
-	if (!url || url[0] == '\0' || s_async.done)
+	if (!url || url[0] == '\0' || s_async.thread)
 		return false;
 
 	if (!thumbnailEnsureCacheDir())
@@ -262,6 +269,8 @@ bool thumbnailLoadAsync(const char* url)
 	if (cached) {
 		s_async.cached = true;
 		s_async.result.image = cached->image;
+		s_async.result.width = (int)cached->subtex.width;
+		s_async.result.height = (int)cached->subtex.height;
 		s_async.result.valid = true;
 		s_async.done = true;
 		return true;
@@ -274,10 +283,10 @@ bool thumbnailLoadAsync(const char* url)
 	return true;
 }
 
-bool thumbnailPollReady(Thumbnail* out)
+ThumbnailStatus thumbnailPollReady(Thumbnail* out)
 {
 	if (!out || !s_async.done)
-		return false;
+		return THUMB_LOADING;
 
 	if (s_async.thread) {
 		threadJoin(s_async.thread, UINT64_MAX);
@@ -290,12 +299,13 @@ bool thumbnailPollReady(Thumbnail* out)
 	if (s_async.cached) {
 		*out = s_async.result;
 		s_async.cached = false;
-		return out->valid;
+		return out->valid ? THUMB_READY : THUMB_FAILED;
 	}
 
 	if (!s_async.ok || !s_async.rgba) {
 		s_async.ok = false;
-		return false;
+		thumbnailDeleteCache(s_async.hash);
+		return THUMB_FAILED;
 	}
 
 	if (s_cacheCount >= (int)(sizeof(s_cache) / sizeof(s_cache[0]))) {
@@ -315,7 +325,8 @@ bool thumbnailPollReady(Thumbnail* out)
 
 	if (!ok) {
 		imageFreeTexture(&entry->tex);
-		return false;
+		thumbnailDeleteCache(s_async.hash);
+		return THUMB_FAILED;
 	}
 
 	entry->loaded = true;
@@ -325,5 +336,5 @@ bool thumbnailPollReady(Thumbnail* out)
 	out->width = (int)entry->subtex.width;
 	out->height = (int)entry->subtex.height;
 	out->valid = true;
-	return true;
+	return THUMB_READY;
 }

@@ -486,6 +486,11 @@ void browserLoadItems(const char* parentId, ItemType type)
 		b->type = browserTypeFromString(typeStr);
 		browserItemArtist(it, b->artist, sizeof(b->artist));
 		browserItemAlbum(it, b->album, sizeof(b->album));
+		const char* albumId = jsonGetString(it, "AlbumId");
+		if (albumId) {
+			strncpy(b->albumId, albumId, sizeof(b->albumId) - 1);
+			b->albumId[sizeof(b->albumId) - 1] = '\0';
+		}
 		if (parentId) {
 			strncpy(b->parentId, parentId, sizeof(b->parentId) - 1);
 			b->parentId[sizeof(b->parentId) - 1] = '\0';
