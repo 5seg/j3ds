@@ -26,12 +26,10 @@ bool guiInit(void)
 		return false;
 	}
 
-	g_gui.font = C2D_FontLoadSystem(CFG_REGION_USA);
-	if (!g_gui.font) {
-		C2D_Fini();
-		C3D_Fini();
-		return false;
-	}
+	/* Load a system font. A NULL return is NOT an error: it means the
+	   console's shared system font is used (C2D handles it transparently).
+	   Requesting JPN also gives Japanese glyphs on non-JPN consoles. */
+	g_gui.font = C2D_FontLoadSystem(CFG_REGION_JPN);
 
 	g_gui.buf = C2D_TextBufNew(GUI_DYNBUF_GLYPHS);
 	if (!g_gui.buf) {
