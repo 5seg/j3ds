@@ -124,9 +124,11 @@ static ThumbnailCacheEntry* thumbnailFindCached(unsigned int hash)
 
 /* Area-average (box) downscale srcW x srcH -> dstW x dstH into dst.
    Every source pixel covered by a destination pixel contributes equally,
-   which keeps edges clean (no nearest-neighbour aliasing). Integer math. */
+   which keeps edges clean (no nearest-neighbour aliasing). Integer math.
+   dstStride is the destination row stride in pixels; it may be larger than
+   dstW so the resized image can be laid out inside a power-of-two canvas. */
 static void thumbnailResizeBox(const u32* src, int srcW, int srcH,
-	u32* dst, int dstW, int dstH)
+	u32* dst, int dstW, int dstH, int dstStride)
 {
 	for (int y = 0; y < dstH; ++y) {
 		int y0 = (int)(((long long)y * srcH) / dstH);
@@ -162,7 +164,7 @@ static void thumbnailResizeBox(const u32* src, int srcW, int srcH,
 			u32 pg = (u32)(g / count);
 			u32 pb = (u32)(b / count);
 			u32 pa = (u32)(a / count);
-			dst[(size_t)y * dstW + x] = (pr << 24) | (pg << 16) | (pb << 8) | pa;
+			dst[(size_t)y * dstStride + x] = (pr << 24) | (pg << 16) | (pb << 8) | pa;
 		}
 	}
 }
@@ -194,7 +196,7 @@ static bool thumbnailBuildTexture(const u32* rgba, int srcW, int srcH,
 		return false;
 	memset(canvas, 0, bytes);
 
-	thumbnailResizeBox(rgba, srcW, srcH, canvas, dstW, dstH);
+	thumbnailResizeBox(rgba, srcW, srcH, canvas, dstW, dstH, (int)texW);
 
 	bool ok = imageUploadToTexture(&entry->tex, canvas, (int)texW, (int)texH,
 		dstW, dstH, &entry->subtex, &entry->image);
