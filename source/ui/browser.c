@@ -273,7 +273,10 @@ static void browserLoadRootItems(void)
     size_t len = 0;
     Result res = jellyfinGetViews(g_app.config.serverUrl, appAuthToken(), &json, &len);
     if (R_FAILED(res)) {
-        browserSetStatus("Views failed: %08lX", (unsigned long)res);
+        if (res == HTTP_ERR_STATUS)
+            browserSetStatus("Views failed: HTTP %d", httpLastStatus());
+        else
+            browserSetStatus("Views failed: %08lX", (unsigned long)res);
         return;
     }
 
@@ -392,7 +395,10 @@ void browserLoadItems(const char* parentId, ItemType type)
     Result res = jellyfinGetItems(g_app.config.serverUrl, appAuthToken(),
         queryParentId, artistId, includeTypes, &json, &len);
     if (R_FAILED(res)) {
-        browserSetStatus("Load failed: %08lX", (unsigned long)res);
+        if (res == HTTP_ERR_STATUS)
+            browserSetStatus("Load failed: HTTP %d", httpLastStatus());
+        else
+            browserSetStatus("Load failed: %08lX", (unsigned long)res);
         return;
     }
 
