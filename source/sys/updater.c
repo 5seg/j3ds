@@ -96,7 +96,8 @@ static void checkThreadFunc(void* arg)
 
 	char* body = NULL;
 	size_t bodyLen = 0;
-	Result ret = httpGet("https://api.github.com/repos/" UPD_OWNER "/" UPD_REPO "/releases/latest",
+	Result ret = httpGetNoVerify(
+		"https://api.github.com/repos/" UPD_OWNER "/" UPD_REPO "/releases/latest",
 		&body, &bodyLen);
 	if (R_FAILED(ret)) {
 		updaterSetMessage("Update check failed (ret=%08lX, HTTP %d)",
@@ -266,7 +267,8 @@ static void installThreadFunc(void* arg)
 	s_up.progressPct = 0;
 	s_up.lastResult = UPD_RES_INSTALL;
 
-	Result ret = httpDownloadFileWithProgress(s_up.ciaUrl, UPD_CIA_PATH, downloadProgress);
+	Result ret = httpDownloadFileWithProgressNoVerify(s_up.ciaUrl, UPD_CIA_PATH,
+		downloadProgress);
 	if (s_up.cancelled || ret == HTTP_ERR_CANCELLED) {
 		s_up.lastResult = UPD_RES_CANCELLED;
 		s_up.threadDone = true;

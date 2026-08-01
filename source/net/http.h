@@ -8,6 +8,7 @@ Result httpGlobalInit(void);
 void httpGlobalExit(void);
 
 Result httpGet(const char* url, char** out, size_t* outLen);
+Result httpGetNoVerify(const char* url, char** out, size_t* outLen);
 Result httpGetWithHeader(const char* url, const char* headerName, const char* headerValue,
 	char** out, size_t* outLen);
 
@@ -39,6 +40,8 @@ bool httpCancelRequested(void);
 typedef void (*HttpDownloadProgress)(size_t downloaded, size_t total);
 
 Result httpDownloadFileWithProgress(const char* url, const char* path,
+	HttpDownloadProgress progress);
+Result httpDownloadFileWithProgressNoVerify(const char* url, const char* path,
 	HttpDownloadProgress progress);
 Result httpDownloadFile(const char* url, const char* path);
 

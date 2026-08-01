@@ -47,7 +47,7 @@ void playerInit(void)
 }
 
 void playerSetTrack(const char* title, const char* artist, const char* album,
-	const char* itemId, const char* artItemId)
+    const char* itemId)
 {
     memset(&s_track, 0, sizeof(s_track));
 
@@ -60,11 +60,12 @@ void playerSetTrack(const char* title, const char* artist, const char* album,
     if (itemId)
         strncpy(s_track.itemId, itemId, sizeof(s_track.itemId) - 1);
 
-    /* Songs usually have no image of their own; the cover lives on the
-       album, so request the album's Primary image when we know it. */
+    /* Prefer the song's own Primary image. Some Jellyfin libraries do not
+       expose a song image; playerPlaySongAt() falls back to the album only
+       after this request fails. */
     s_track.thumbnailUrl[0] = '\0';
-    if (artItemId && artItemId[0] != '\0' && g_app.config.serverUrl[0] != '\0') {
-        jellyfinGetThumbnailUrl(g_app.config.serverUrl, appAuthToken(), artItemId,
+    if (itemId && itemId[0] != '\0' && g_app.config.serverUrl[0] != '\0') {
+        jellyfinGetThumbnailUrl(g_app.config.serverUrl, appAuthToken(), itemId,
             s_track.thumbnailUrl, sizeof(s_track.thumbnailUrl));
     }
 
@@ -124,13 +125,22 @@ Result playerPlaySongAt(int index)
         return res;
 
     s_queueIndex = index;
-    playerSetTrack(song->name, song->artist, song->album, song->id,
-        song->albumId[0] ? song->albumId : song->id);
+    playerSetTrack(song->name, song->artist, song->album, song->id);
 
     /* Stop any active stream first so the httpc service is idle, then fetch
        and upload the art, then reopen the stream. Never let the two overlap. */
     audioStop();
     playerLoadThumb();
+
+    /* If the song has no Primary image, use its album cover as a fallback.
+       The fallback is attempted only after the song-specific URL failed, so
+       tracks with distinct artwork do not all display the same album image. */
+    if (!s_thumbReady && song->albumId[0] != '\0'
+        && strcmp(song->albumId, song->id) != 0) {
+        jellyfinGetThumbnailUrl(g_app.config.serverUrl, appAuthToken(),
+            song->albumId, s_track.thumbnailUrl, sizeof(s_track.thumbnailUrl));
+        s_thumbReady = thumbnailLoad(s_track.thumbnailUrl, &s_thumb);
+    }
 
     return audioPlayStream(url);
 }

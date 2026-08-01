@@ -16,10 +16,10 @@ void playerInit(void);
 void playerRender(void);
 void playerUpdate(void);
 void playerRenderTop(void);
-/* artItemId is the item whose Primary image is shown as album art (usually
-   the song's album, falling back to the song itself). */
+/* The song's own Primary image is preferred. The player may fall back to the
+   album image when the song has no image. */
 void playerSetTrack(const char* title, const char* artist, const char* album,
-	const char* itemId, const char* artItemId);
+	const char* itemId);
 
 /* Set the play queue (the song list the current track belongs to).
    Copies the items, so the caller may reuse its list afterwards. */

@@ -100,13 +100,13 @@ static Result httpReadResponse(httpcContext* context, char** out, size_t* outLen
 }
 
 static Result httpRequest(httpcContext* context, HTTPC_RequestMethod method, const char* url,
-	const char* body, const HttpHeader* headers, int headerCount, u32* statusOut)
+	const char* body, const HttpHeader* headers, int headerCount, bool noVerify, u32* statusOut)
 {
 	Result ret = httpcOpenContext(context, method, url, 1);
 	if (R_FAILED(ret))
 		return ret;
 
-	if (g_app.config.disableSslVerify) {
+	if (noVerify || g_app.config.disableSslVerify) {
 		ret = httpcSetSSLOpt(context, SSLCOPT_DisableVerify);
 		if (R_FAILED(ret))
 			goto cleanup;
@@ -169,7 +169,7 @@ cleanup:
 }
 
 static Result httpDoRequest(const char* url, HTTPC_RequestMethod method, const char* body,
-	const HttpHeader* headers, int headerCount, char** out, size_t* outLen)
+	const HttpHeader* headers, int headerCount, bool noVerify, char** out, size_t* outLen)
 {
 	if (!url || !out || !outLen)
 		return HTTP_ERR_GENERIC;
@@ -191,7 +191,7 @@ static Result httpDoRequest(const char* url, HTTPC_RequestMethod method, const c
 
 	while (true) {
 		u32 status = 0;
-		ret = httpRequest(&context, method, currentUrl, body, headers, headerCount, &status);
+		ret = httpRequest(&context, method, currentUrl, body, headers, headerCount, noVerify, &status);
 		if (R_FAILED(ret)) {
 			free(redirectUrl);
 			return ret;
@@ -242,38 +242,43 @@ void httpGlobalExit(void)
 
 Result httpGet(const char* url, char** out, size_t* outLen)
 {
-	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, NULL, 0, out, outLen);
+	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, NULL, 0, false, out, outLen);
+}
+
+Result httpGetNoVerify(const char* url, char** out, size_t* outLen)
+{
+	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, NULL, 0, true, out, outLen);
 }
 
 Result httpGetWithHeader(const char* url, const char* headerName, const char* headerValue,
 	char** out, size_t* outLen)
 {
 	HttpHeader headers[] = { { headerName, headerValue } };
-	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, headers, 1, out, outLen);
+	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, headers, 1, false, out, outLen);
 }
 
 Result httpGetWithHeaders(const char* url, const HttpHeader* headers, int headerCount,
 	char** out, size_t* outLen)
 {
-	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, headers, headerCount, out, outLen);
+	return httpDoRequest(url, HTTPC_METHOD_GET, NULL, headers, headerCount, false, out, outLen);
 }
 
 Result httpPost(const char* url, const char* body, char** out, size_t* outLen)
 {
-	return httpDoRequest(url, HTTPC_METHOD_POST, body, NULL, 0, out, outLen);
+	return httpDoRequest(url, HTTPC_METHOD_POST, body, NULL, 0, false, out, outLen);
 }
 
 Result httpPostWithHeader(const char* url, const char* body, const char* headerName,
 	const char* headerValue, char** out, size_t* outLen)
 {
 	HttpHeader headers[] = { { headerName, headerValue } };
-	return httpDoRequest(url, HTTPC_METHOD_POST, body, headers, 1, out, outLen);
+	return httpDoRequest(url, HTTPC_METHOD_POST, body, headers, 1, false, out, outLen);
 }
 
 Result httpPostWithHeaders(const char* url, const char* body, const HttpHeader* headers,
 	int headerCount, char** out, size_t* outLen)
 {
-	return httpDoRequest(url, HTTPC_METHOD_POST, body, headers, headerCount, out, outLen);
+	return httpDoRequest(url, HTTPC_METHOD_POST, body, headers, headerCount, false, out, outLen);
 }
 
 Result httpDownloadFile(const char* url, const char* path)
@@ -298,7 +303,7 @@ Result httpDownloadToSink(const char* url, HttpChunkSink sink, void* user)
 
 	while (true) {
 		u32 status = 0;
-		ret = httpRequest(&context, HTTPC_METHOD_GET, currentUrl, NULL, NULL, 0, &status);
+		ret = httpRequest(&context, HTTPC_METHOD_GET, currentUrl, NULL, NULL, 0, false, &status);
 		if (R_FAILED(ret)) {
 			free(redirectUrl);
 			return ret;
@@ -357,7 +362,7 @@ Result httpDownloadToSink(const char* url, HttpChunkSink sink, void* user)
 	}
 }
 
-Result httpDownloadFileWithProgress(const char* url, const char* path,
+static Result httpDownloadFileInternal(const char* url, const char* path, bool noVerify,
 	HttpDownloadProgress progress)
 {
 	if (!url || !path || strlen(url) >= HTTP_MAX_URL)
@@ -381,7 +386,7 @@ Result httpDownloadFileWithProgress(const char* url, const char* path,
 
 	while (true) {
 		u32 status = 0;
-		ret = httpRequest(&context, HTTPC_METHOD_GET, currentUrl, NULL, NULL, 0, &status);
+		ret = httpRequest(&context, HTTPC_METHOD_GET, currentUrl, NULL, NULL, 0, noVerify, &status);
 		if (R_FAILED(ret)) {
 			free(redirectUrl);
 			fclose(f);
@@ -459,4 +464,16 @@ Result httpDownloadFileWithProgress(const char* url, const char* path,
 			return downloadRet;
 		return 0;
 	}
+}
+
+Result httpDownloadFileWithProgress(const char* url, const char* path,
+	HttpDownloadProgress progress)
+{
+	return httpDownloadFileInternal(url, path, false, progress);
+}
+
+Result httpDownloadFileWithProgressNoVerify(const char* url, const char* path,
+	HttpDownloadProgress progress)
+{
+	return httpDownloadFileInternal(url, path, true, progress);
 }
