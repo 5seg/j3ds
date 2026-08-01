@@ -45,12 +45,11 @@ void appUpdate(void)
 	g_app.touch = touch;
 	g_app.touchDown = (g_app.kDown & KEY_TOUCH) != 0;
 
-	if (g_app.kDown & KEY_START) {
-		g_app.running = false;
-		return;
-	}
-
 	if (g_app.current == SCREEN_HOME) {
+		if (g_app.kDown & KEY_START) {
+			g_app.running = false;
+			return;
+		}
 		if (g_app.kDown & KEY_A) {
 			screenChange(SCREEN_BROWSER);
 			browserLoadRoot();

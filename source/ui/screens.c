@@ -231,9 +231,9 @@ static void screenRenderHome(void)
 	guiTextCentered("[SELECT]", sx + cardW / 2.0f, HEADER_H + 96, 0.45f, GUI_COL_DIM);
 
 	/* Player card. */
-	guiPanel(10, HEADER_H + 132, GUI_BOT_W - 20, 52);
-	guiTextCentered("PLAYER", GUI_BOT_W / 2.0f, HEADER_H + 146, 0.6f, GUI_COL_TEXT);
-	guiTextCentered("Now playing  [B]", GUI_BOT_W / 2.0f, HEADER_H + 170, 0.45f, GUI_COL_MUTED);
+	guiPanel(10, HEADER_H + 124, GUI_BOT_W - 20, 52);
+	guiTextCentered("PLAYER", GUI_BOT_W / 2.0f, HEADER_H + 138, 0.6f, GUI_COL_TEXT);
+	guiTextCentered("Now playing  [B]", GUI_BOT_W / 2.0f, HEADER_H + 162, 0.45f, GUI_COL_MUTED);
 
 	screenRenderHints("A: Library", "SELECT: Setup", "START: Quit");
 }

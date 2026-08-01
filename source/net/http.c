@@ -188,7 +188,7 @@ static Result httpDoRequest(const char* url, HTTPC_RequestMethod method, const c
 
 Result httpGlobalInit(void)
 {
-	return httpcInit(0);
+	return httpcInit(4 * 1024 * 1024);
 }
 
 void httpGlobalExit(void)
