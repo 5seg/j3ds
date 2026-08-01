@@ -7,6 +7,7 @@
 
 #include "app.h"
 #include "net/certs.h"
+#include "net/usertrust_rsa.h"
 
 #define HTTP_MAX_URL        2048
 #define HTTP_CHUNK_SIZE     4096
@@ -121,6 +122,10 @@ static Result httpRequest(httpcContext* context, HTTPC_RequestMethod method, con
 		if (R_FAILED(ret))
 			goto cleanup;
 		ret = httpcAddTrustedRootCA(context, g_githubIntR36, sizeof(g_githubIntR36));
+		if (R_FAILED(ret))
+			goto cleanup;
+		ret = httpcAddTrustedRootCA(context, g_userTrustRsaRoot,
+			sizeof(g_userTrustRsaRoot));
 		if (R_FAILED(ret))
 			goto cleanup;
 	}

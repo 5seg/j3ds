@@ -152,10 +152,11 @@ static void thumbnailResizeBox(const u32* src, int srcW, int srcH,
 				const u32* row = src + (size_t)sy * srcW;
 				for (int sx = x0; sx < x1; ++sx) {
 					u32 p = row[sx];
-					r += (p >> 24) & 0xFF;
-					g += (p >> 16) & 0xFF;
-					b += (p >> 8) & 0xFF;
-					a += p & 0xFF;
+					/* C2D_Color32 stores RGBA as R in the low byte. */
+					r += p & 0xFF;
+					g += (p >> 8) & 0xFF;
+					b += (p >> 16) & 0xFF;
+					a += (p >> 24) & 0xFF;
 					count++;
 				}
 			}
@@ -164,7 +165,7 @@ static void thumbnailResizeBox(const u32* src, int srcW, int srcH,
 			u32 pg = (u32)(g / count);
 			u32 pb = (u32)(b / count);
 			u32 pa = (u32)(a / count);
-			dst[(size_t)y * dstStride + x] = (pr << 24) | (pg << 16) | (pb << 8) | pa;
+				dst[(size_t)y * dstStride + x] = C2D_Color32(pr, pg, pb, pa);
 		}
 	}
 }
