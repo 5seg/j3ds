@@ -151,21 +151,23 @@ static void thumbnailResizeBox(const u32* src, int srcW, int srcH,
 			for (int sy = y0; sy < y1; ++sy) {
 				const u32* row = src + (size_t)sy * srcW;
 				for (int sx = x0; sx < x1; ++sx) {
-					u32 p = row[sx];
-					/* C2D_Color32 stores RGBA as R in the low byte. */
-					r += p & 0xFF;
-					g += (p >> 8) & 0xFF;
-					b += (p >> 16) & 0xFF;
-					a += (p >> 24) & 0xFF;
+					/* Source and destination are both GPU_RGBA8 texels
+					   (A,B,G,R in memory), not C2D_Color32 values. */
+					u8 sr, sg, sb, sa;
+					imageTexelUnpack(row[sx], &sr, &sg, &sb, &sa);
+					r += sr;
+					g += sg;
+					b += sb;
+					a += sa;
 					count++;
 				}
 			}
 
-			u32 pr = (u32)(r / count);
-			u32 pg = (u32)(g / count);
-			u32 pb = (u32)(b / count);
-			u32 pa = (u32)(a / count);
-				dst[(size_t)y * dstStride + x] = C2D_Color32(pr, pg, pb, pa);
+			u8 pr = (u8)(r / count);
+			u8 pg = (u8)(g / count);
+			u8 pb = (u8)(b / count);
+			u8 pa = (u8)(a / count);
+			dst[(size_t)y * dstStride + x] = imageTexelPack(pr, pg, pb, pa);
 		}
 	}
 }

@@ -18,6 +18,19 @@
 #define UPD_CIA_PATH "sdmc:/3ds/j3ds/update.cia"
 #define UPD_CIA_URL_MAX 768
 
+/* GitHub (api.github.com and objects.githubusercontent.com) now requires
+   TLS 1.2, which the 3DS httpc/sslc stack cannot negotiate. The in-app
+   self-update path is therefore disabled: updaterCheck() never spawns a
+   worker thread and never touches httpc, it only shows a short notice.
+   Set this to 1 to restore the original download/install path. */
+#define UPDATER_GITHUB_ENABLED 0
+
+#define UPD_MSG_UNAVAILABLE \
+	"アプリ内更新は現在利用できません。\n" \
+	"GitHub TLS 1.2非互換のため、\n" \
+	"GitHub ReleasesからCIAを\n" \
+	"手動インストールしてください。"
+
 #define UPD_ERR_OUT_OF_SPACE ((Result)-0x5000)
 #define UPD_ERR_NO_MEM       ((Result)-0x5001)
 
@@ -45,7 +58,7 @@ typedef struct {
 	int phase;
 	char latestTag[32];
 	char ciaUrl[UPD_CIA_URL_MAX];
-	char message[160];
+	char message[256];
 	u64 titleId;
 	Thread thread;
 	volatile bool threadDone;
@@ -56,6 +69,7 @@ typedef struct {
 
 static Updater s_up;
 
+#if UPDATER_GITHUB_ENABLED
 /* Compare dotted numeric versions, ignoring a leading 'v'. Returns
    <0 if a<b, 0 if equal, >0 if a>b. */
 static int versionCompare(const char* a, const char* b)
@@ -73,6 +87,7 @@ static int versionCompare(const char* a, const char* b)
 	}
 	return 0;
 }
+#endif /* UPDATER_GITHUB_ENABLED */
 
 static void updaterSetMessage(const char* fmt, ...)
 {
@@ -83,6 +98,7 @@ static void updaterSetMessage(const char* fmt, ...)
 	s_up.message[sizeof(s_up.message) - 1] = '\0';
 }
 
+#if UPDATER_GITHUB_ENABLED
 /* ------------------------------------------------------------------ */
 /* Check thread: hit the GitHub latest-release API, remember the tag   */
 /* and the j3ds.cia asset URL.                                         */
@@ -299,6 +315,7 @@ static void installThreadFunc(void* arg)
 	s_up.lastResult = UPD_RES_OK_UPDATE;
 	s_up.threadDone = true;
 }
+#endif /* UPDATER_GITHUB_ENABLED */
 
 /* ------------------------------------------------------------------ */
 /* Public API                                                          */
@@ -334,13 +351,18 @@ void updaterCheck(void)
 	if (s_up.state != UPD_IDLE)
 		return;
 
-	s_up.state = UPD_CHECKING;
 	s_up.anim = 0;
+	s_up.thread = 0;
 	s_up.threadDone = false;
 	s_up.cancelled = false;
+	s_up.phase = 0;
+	s_up.progressPct = 0;
 	s_up.message[0] = '\0';
 	s_up.latestTag[0] = '\0';
 	s_up.ciaUrl[0] = '\0';
+
+#if UPDATER_GITHUB_ENABLED
+	s_up.state = UPD_CHECKING;
 
 	s32 prio = 0;
 	svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
@@ -349,8 +371,15 @@ void updaterCheck(void)
 		s_up.state = UPD_MESSAGE;
 		updaterSetMessage("Could not start update check");
 	}
+#else
+	/* No thread, no httpc, no network: just tell the user why. */
+	s_up.lastResult = UPD_RES_HTTP;
+	s_up.state = UPD_MESSAGE;
+	updaterSetMessage("%s", UPD_MSG_UNAVAILABLE);
+#endif
 }
 
+#if UPDATER_GITHUB_ENABLED
 static void updaterStartInstall(void)
 {
 	audioStop();
@@ -381,12 +410,15 @@ static void relaunchTitle(void)
 	configSave(&g_app.config);
 	APT_DoApplicationJump(param, sizeof(param), hmac);
 }
+#endif /* UPDATER_GITHUB_ENABLED */
 
 void updaterUpdate(void)
 {
 	s_up.anim++;
 
-	if (s_up.threadDone) {
+	/* Only a live worker thread can ever set threadDone; the thread handle
+	   guard keeps this branch inert when the updater runs threadless. */
+	if (s_up.threadDone && s_up.thread) {
 		threadJoin(s_up.thread, U64_MAX);
 		threadFree(s_up.thread);
 		s_up.thread = 0;
@@ -426,6 +458,7 @@ void updaterUpdate(void)
 	u32 kDown = g_app.kDown;
 
 	switch (s_up.state) {
+#if UPDATER_GITHUB_ENABLED
 	case UPD_CHECKING:
 		if (kDown & KEY_B)
 			s_up.cancelled = true;
@@ -449,6 +482,7 @@ void updaterUpdate(void)
 		else if (kDown & KEY_B)
 			s_up.state = UPD_IDLE;
 		break;
+#endif
 
 	case UPD_MESSAGE:
 		if (kDown & KEY_B)
@@ -456,6 +490,13 @@ void updaterUpdate(void)
 		break;
 
 	default:
+#if !UPDATER_GITHUB_ENABLED
+		/* The networked states are unreachable now and have no worker
+		   thread behind them, so never let the modal get stuck there. */
+		s_up.state = UPD_IDLE;
+		s_up.cancelled = false;
+		s_up.threadDone = false;
+#endif
 		break;
 	}
 }
@@ -464,6 +505,31 @@ void updaterUpdate(void)
 /* Rendering (bottom screen modal overlay)                             */
 /* ------------------------------------------------------------------ */
 
+#define UPD_LINE_H 18.0f
+
+/* Draw a possibly multi-line ('\n'-separated) message, centred line by line. */
+static void drawMessage(const char* text, float cx, float y, float scale, u32 color)
+{
+	char line[128];
+
+	while (*text) {
+		const char* nl = strchr(text, '\n');
+		size_t len = nl ? (size_t)(nl - text) : strlen(text);
+		if (len >= sizeof(line))
+			len = sizeof(line) - 1;
+		memcpy(line, text, len);
+		line[len] = '\0';
+
+		guiTextCentered(line, cx, y, scale, color);
+		y += UPD_LINE_H;
+
+		if (!nl)
+			break;
+		text = nl + 1;
+	}
+}
+
+#if UPDATER_GITHUB_ENABLED
 static const char* spinner(void)
 {
 	static const char frames[] = "-\\|/";
@@ -480,6 +546,7 @@ static void drawProgressBar(int pct)
 			guiRect(x + 2, y + 2, fw, h - 4, GUI_COL_ACCENT);
 	}
 }
+#endif /* UPDATER_GITHUB_ENABLED */
 
 void updaterRenderBottom(void)
 {
@@ -487,6 +554,7 @@ void updaterRenderBottom(void)
 	guiText("UPDATE", 46, 50, 0.6f, GUI_COL_ACCENT);
 
 	switch (s_up.state) {
+#if UPDATER_GITHUB_ENABLED
 	case UPD_CHECKING:
 		guiTextCentered("Checking for updates...", GUI_BOT_W / 2.0f, 104, 0.5f,
 			GUI_COL_TEXT);
@@ -528,11 +596,22 @@ void updaterRenderBottom(void)
 		guiTextCentered("A: Relaunch   B: Back", GUI_BOT_W / 2.0f, 168, 0.45f,
 			GUI_COL_MUTED);
 		break;
+#endif
 
-	case UPD_MESSAGE:
-		guiTextCentered(s_up.message, GUI_BOT_W / 2.0f, 110, 0.5f, GUI_COL_TEXT);
+	case UPD_MESSAGE: {
+		/* Centre the block vertically so multi-line notices stay in panel. */
+		int lines = 1;
+		for (const char* p = s_up.message; *p; ++p) {
+			if (*p == '\n')
+				lines++;
+		}
+		float y = 110.0f - (lines - 1) * (UPD_LINE_H / 2.0f);
+		if (y < 74.0f)
+			y = 74.0f;
+		drawMessage(s_up.message, GUI_BOT_W / 2.0f, y, 0.5f, GUI_COL_TEXT);
 		guiTextCentered("B: OK", GUI_BOT_W / 2.0f, 168, 0.45f, GUI_COL_MUTED);
 		break;
+	}
 
 	default:
 		break;

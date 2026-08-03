@@ -85,7 +85,7 @@ bool imageLoadJpegRgba(const void* data, size_t size, int maxDim,
 		jpeg_read_scanlines(&cinfo, buffer, 1);
 		u8* line = buffer[0];
 		for (int x = 0; x < srcW; x++) {
-			rgba[(size_t)row * srcW + x] = C2D_Color32(line[x * 3],
+			rgba[(size_t)row * srcW + x] = imageTexelPack(line[x * 3],
 				line[x * 3 + 1], line[x * 3 + 2], 0xFF);
 		}
 		row++;
